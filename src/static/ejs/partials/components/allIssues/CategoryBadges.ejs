@@ -1,13 +1,13 @@
 <div class="category-badges-container">
   <div class="category-item">
     <div class="category-item-inner">
-      <span class="category-badge must-fix">Must Fix</span>
+      <span class="category-badge must-fix"><%= t('common.severity.mustFix') %></span>
 
       <span class="category-tooltip-wrapper">
         <button
           type="button"
           class="category-tooltip-icon"
-          aria-label="About Must Fix category"
+          aria-label="<%= t('allIssues.aboutCategory', { name: t('common.severity.mustFix') }) %>"
           aria-describedby="mustFixTooltip"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
@@ -18,24 +18,23 @@
         </button>
 
         <span class="category-tooltip-bubble" id="mustFixTooltip" role="tooltip">
-          Must Fix highlights issues based on the minimum accessibility standards
-          (Level A and AA). Fix them to achieve 20/20 WCAG Score.
+          <%= t('allIssues.mustFixTooltip') %>
         </span>
       </span>
 
-      <span><%= items.mustFix.rules.length %> issues</span>
+      <span><%= t('common.issueCount.other', { count: items.mustFix.rules.length }) %></span>
     </div>
   </div>
 
   <div class="category-item">
     <div class="category-item-inner">
-      <span class="category-badge good-to-fix">Good to Fix</span>
+      <span class="category-badge good-to-fix"><%= t('common.severity.goodToFix') %></span>
 
       <span class="category-tooltip-wrapper">
         <button
           type="button"
           class="category-tooltip-icon"
-          aria-label="About Good to Fix category"
+          aria-label="<%= t('allIssues.aboutCategory', { name: t('common.severity.goodToFix') }) %>"
           aria-describedby="goodToFixTooltip"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
@@ -46,24 +45,23 @@
         </button>
 
         <span class="category-tooltip-bubble" id="goodToFixTooltip" role="tooltip">
-          Good to Fix highlights issues based on WCAG Level AAA, and all industry
-          best practices.
+          <%= t('allIssues.goodToFixTooltip') %>
         </span>
       </span>
 
-      <span><%= items.goodToFix.rules.length %> issues</span>
+      <span><%= t('common.issueCount.other', { count: items.goodToFix.rules.length }) %></span>
     </div>
   </div>
 
   <div class="category-item">
     <div class="category-item-inner">
-      <span class="category-badge needs-review">Manual Test</span>
+      <span class="category-badge needs-review"><%= t('common.severity.needsReview') %></span>
 
       <span class="category-tooltip-wrapper">
         <button
           type="button"
           class="category-tooltip-icon"
-          aria-label="About Manual Test category"
+          aria-label="<%= t('allIssues.aboutCategory', { name: t('common.severity.needsReview') }) %>"
           aria-describedby="manualTestTooltip"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14"
@@ -74,12 +72,11 @@
         </button>
 
         <span class="category-tooltip-bubble" id="manualTestTooltip" role="tooltip">
-          Manual Test highlights issues that require human testing using screen
-          readers and keyboards.
+          <%= t('allIssues.manualTestTooltip') %>
         </span>
       </span>
 
-      <span><%= items.needsReview.rules.length %> issues</span>
+      <span><%= t('common.issueCount.other', { count: items.needsReview.rules.length }) %></span>
     </div>
   </div>
 </div>

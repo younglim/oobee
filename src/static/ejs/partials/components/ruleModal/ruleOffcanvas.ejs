@@ -19,7 +19,7 @@
                 type="button"
                 class="btn-close modal-button-right"
                 data-bs-dismiss="modal"
-                aria-label="Close this popup"
+                aria-label="<%= t('ruleModal.closePopup') %>"
               ></button>
             </div>
             <!-- SVG Image -->
@@ -27,17 +27,17 @@
               <img
                 id="expandedRuleImage"
                 src=""
-                alt="Issue illustration"
+                alt="<%= t('ruleModal.issueIllustration') %>"
                 class="rule-modal-image"
               />
             </div>
 
             <div class="d-flex flex-column gap-3 p-4">
-              <h1 id="expandedRuleName">Loading...</h1>
+              <h1 id="expandedRuleName"><%= t('ruleModal.loading') %></h1>
 
               <!-- Conformance badges -->
               <div class="rule-modal-conformance">
-                <span id="expandedRuleCategoryBadge" class="mustfix-badge-label">Must Fix</span>
+                <span id="expandedRuleCategoryBadge" class="mustfix-badge-label"><%= t('common.severity.mustFix') %></span>
                 <div id="expandedRuleConformance" class="rule-modal-conformance-badges"></div>
               </div>
 
@@ -46,7 +46,7 @@
 
               <div id="expandedRuleManualTestSection" style="display: none">
                 <div>
-                  This occurrence might be a false positive that needs to be verified by a human.
+                  <%= t('ruleModal.manualTestNote') %>
                 </div>
               </div>
 
@@ -81,7 +81,7 @@
                     fill="#5735DF"
                   />
                 </svg>
-                <span>This issue might benefit from AI suggested fixes.</span>
+                <span><%= t('ruleModal.aiBenefit') %></span>
               </div>
             </div>
 
@@ -114,13 +114,13 @@
                         </svg>
                         <div class="d-flex justify-content-between align-items-center w-100">
                           <h3 id="expandedRuleDropdownTitle" class="mb-0">
-                            Pages affected by this issue (#)
+                            <%= t('ruleModal.pagesAffectedPlaceholder') %>
                           </h3>
                           <div class="d-flex align-items-center gap-3">
                             <span
                               id="expandedRuleDropdownToggleCategoryInfo"
                               class="rule-occurrence-count"
-                              ># Total occ.</span
+                              ><%= t('ruleModal.totalOccPlaceholder') %></span
                             >
                           </div>
                         </div>
@@ -135,7 +135,7 @@
                     >
                       <div class="accordion-body">
                         <div class="group-by-toggle">
-                          <span class="group-by-label">Group by</span>
+                          <span class="group-by-label"><%= t('ruleModal.groupBy') %></span>
                           <div class="group-by-options">
                             <div class="form-check form-check-inline">
                               <input
@@ -146,7 +146,7 @@
                                 value="page"
                                 checked
                               />
-                              <label class="form-check-label" for="groupByPage">Page</label>
+                              <label class="form-check-label" for="groupByPage"><%= t('ruleModal.groupByPage') %></label>
                             </div>
 
                             <div class="form-check form-check-inline">
@@ -158,13 +158,13 @@
                                 value="html"
                               />
                               <label class="form-check-label" for="groupByHtmlElement"
-                                >HTML Element</label
+                                ><%= t('ruleModal.groupByHtmlElement') %></label
                               >
                             </div>
                           </div>
                         </div>
                         <div id="expandedRuleCategoryContent"></div>
-                        <div id="expandedRulePageContent">Total # affected pages</div>
+                        <div id="expandedRulePageContent"><%= t('ruleModal.totalAffectedPagesPlaceholder') %></div>
                       </div>
                     </div>
                   </div>
@@ -180,11 +180,11 @@
                 type="button"
                 class="btn-close modal-button"
                 data-bs-dismiss="modal"
-                aria-label="Close"
+                aria-label="<%= t('common.close') %>"
               ></button>
             </div>
-            <h2 class="rule-modal-section-title">Step by step plan</h2>
-            <h3>How to Fix</h3>
+            <h2 class="rule-modal-section-title"><%= t('ruleModal.stepByStepPlan') %></h2>
+            <h3><%= t('ruleModal.howToFix') %></h3>
             <!-- How to Fix Section -->
             <div id="stepByStepContainer" class="rule-modal-how-to-fix">
               <!-- Steps will be populated dynamically -->

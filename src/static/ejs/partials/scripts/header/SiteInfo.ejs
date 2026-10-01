@@ -1,6 +1,6 @@
 <script>
   (function populateSiteInfo() {
-    const siteName = scanData.siteName || 'N/A';
+    const siteName = scanData.siteName || t('common.na');
     document.getElementById('siteName').textContent = siteName;
 
     const siteUrl = scanData.urlScanned || '#';
@@ -29,7 +29,7 @@
 
     const formatScanDate = dateString => {
       const utcDate = new Date(dateString);
-      const formattedDate = utcDate.toLocaleString('en-GB', {
+      const formattedDate = utcDate.toLocaleString(t('common.dateLocale'), {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -46,17 +46,17 @@
         /GMT([+-])(\d{1,2})/,
         (_, sign, hour) => `(GMT ${sign}${hour.padStart(2, '0')})`,
       );
-      document.getElementById('siteScannedOn').textContent = `Scanned on ${formattedScanDate}`;
+      document.getElementById('siteScannedOn').textContent = t('header.scannedOn', { date: formattedScanDate });
     } else {
-      document.getElementById('siteScannedOn').textContent = 'Scan date: N/A';
+      document.getElementById('siteScannedOn').textContent = t('header.scanDateNA');
     }
 
     const siteViewportElement = document.getElementById('siteViewport');
     if (siteViewportElement) {
       const viewport = scanData.viewport || scanData.deviceChosen || 'Desktop';
       siteViewportElement.textContent = viewport.startsWith('CustomWidth')
-        ? `${viewport.split('_')[1]} Custom Width View`
-        : `${viewport} View`;
+        ? t('header.customWidthView', { width: viewport.split('_')[1] })
+        : t('header.viewportView', { viewport });
     }
   })();
 </script>

@@ -11,11 +11,11 @@
     }
   } catch (_) { /* keep safeUrlScannedHref = '#' */ }
 %>
-<h2>About this scan</h2>
+<h2><%= t('summary.aboutScan') %></h2>
 <ul class="p-0" style="list-style: none">
   <li class="svg-container">
     <svg
-      aria-label="Start time"
+      aria-label="<%= t('summary.startTime') %>"
       width="18px"
       viewBox="0 0 18 17"
       fill="none"
@@ -33,7 +33,7 @@
   </li>
   <li class="svg-container" style="word-break: break-all;">
     <svg
-      aria-label="URL scanned"
+      aria-label="<%= t('summary.urlScanned') %>"
       width="18px"
       viewBox="0 0 18 17"
       fill="none"
@@ -47,13 +47,13 @@
         fill="#93928d"
       />
     </svg>
-    <a aria-label="URL scanned" href="<%= safeUrlScannedHref %>" target="_blank" rel="noopener noreferrer"><%= urlScanned %></a>
+    <a aria-label="<%= t('summary.urlScanned') %>" href="<%= safeUrlScannedHref %>" target="_blank" rel="noopener noreferrer"><%= urlScanned %></a>
   </li>
   <% if (viewport !== null) { %>
   <li class="svg-container">
     <% if (viewport.startsWith('Desktop')) { %>
     <svg
-      aria-label="Viewport"
+      aria-label="<%= t('summary.viewportLabel') %>"
       width="18px"
       viewBox="0 0 18 17"
       fill="none"
@@ -67,7 +67,7 @@
     </svg>
     <% } else if (viewport.startsWith('CustomWidth')) { %>
     <svg
-      aria-label="Viewport"
+      aria-label="<%= t('summary.viewportLabel') %>"
       width="18px"
       viewBox="0 0 18 17"
       fill="none"
@@ -83,7 +83,7 @@
     </svg>
     <% } else { %>
     <svg
-      aria-label="Viewport"
+      aria-label="<%= t('summary.viewportLabel') %>"
       width="18px"
       viewBox="0 0 18 17"
       fill="none"
@@ -99,13 +99,13 @@
     </svg>
     <% } %>
     <span>
-      <%= viewport.startsWith("CustomWidth") ? `${viewport.split("_")[1]} width` : viewport %> viewport
+      <%= viewport.startsWith("CustomWidth") ? t('summary.customWidthViewport', { width: viewport.split("_")[1] }) : t('summary.viewport', { viewport }) %>
     </span>
   </li>
   <% } %>
   <li class="svg-container">
     <svg
-      aria-label="Pages scanned"
+      aria-label="<%= t('summary.pagesScannedLabel') %>"
       width="18px"
       viewBox="0 0 18 17"
       fill="none"
@@ -149,6 +149,6 @@
         </clipPath>
       </defs>
     </svg>
-    <span><%= isCustomFlow ? 'Custom Flow (' + totalPagesScanned + ' pages)' : totalPagesScanned + ' pages' %></span>
+    <span><%= isCustomFlow ? t('summary.customFlowPages', { count: totalPagesScanned }) : t('summary.pagesCount', { count: totalPagesScanned }) %></span>
   </li>
 </ul>

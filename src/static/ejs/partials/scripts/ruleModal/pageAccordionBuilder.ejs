@@ -59,7 +59,9 @@
     const isCustomFlow = <%- isCustomFlow -%>;
 
     if (category === 'passed') {
-      contentContainer.innerHTML = `You may find the list of passed HTML elements in <a href='./passed_items.json' target='_blank'>passed_items.json.txt</a>.`;
+      contentContainer.innerHTML = t('ruleModal.passedItems', {
+        link: `<a href='./passed_items.json' target='_blank'>passed_items.json.txt</a>`,
+      });
       return;
     }
 
@@ -88,9 +90,9 @@
               ? Object.keys(selectedCategory.htmlGroups).length
               : (selectedCategory.pagesAffectedCount || selectedCategory.pagesAffected.length);
             if (isHtmlGrouping) {
-              dropdownTitle.innerText = `HTML elements affected by this issue (${count})`;
+              dropdownTitle.innerText = t('ruleModal.htmlElementsAffected', { count });
             } else {
-              dropdownTitle.innerText = `Pages affected by this issue (${count})`;
+              dropdownTitle.innerText = t('ruleModal.pagesAffected', { count });
             }
           }
         }
@@ -186,8 +188,8 @@
     if (Object.keys(groupedByHtml).length === 0) {
       contentContainer.innerHTML = `
         <div class="p-4 text-center">
-          <p class="mb-0">No items available for grouping by HTML element.</p>
-          <p class="text-muted small">Items may need to be loaded first by expanding pages.</p>
+          <p class="mb-0">${t('ruleModal.noItemsForHtmlGrouping')}</p>
+          <p class="text-muted small">${t('ruleModal.itemsMayNeedLoading')}</p>
         </div>
       `;
       return;
@@ -225,7 +227,8 @@
     const accordionId = `${ruleInCategory.rule}-${category}-html-${index}`;
     const itemsCount = items.length;
 
-    const htmlPreview = htmlElement === 'No HTML element' ? htmlElement : htmlElement;
+    // 'No HTML element' is an internal grouping sentinel; only the displayed text is translated.
+    const htmlPreview = htmlElement === 'No HTML element' ? t('ruleModal.noHtmlElement') : htmlElement;
     const escapedPreview = htmlEscapeString(htmlPreview);
 
     const accordion = createElementFromString(`
@@ -234,11 +237,11 @@
           <div class="accordion-item rule-modal-item">
             <div class="accordion-header" id="${accordionId}-title">
               <button
-                aria-label="HTML element ${index + 1}, ${itemsCount} ${itemsCount === 1 ? 'occurrence' : 'occurrences'}"
+                aria-label="${htmlEscapeString(t('ruleModal.htmlElementAria', { index: index + 1, occurrences: tCount('common.occurrenceCount', itemsCount) }))}"
                 class="accordion-button collapsed"
                 type="button"
               >
-                <span class="sr-only visually-hidden">${itemsCount} ${itemsCount === 1 ? 'occurrence' : 'occurrences'}</span>
+                <span class="sr-only visually-hidden">${tCount('common.occurrenceCount', itemsCount)}</span>
                 <svg
                   class="accordion-arrow"
                   width="24"
@@ -253,7 +256,7 @@
                   />
                 </svg>
                 <div class="me-3 flex-1">${escapedPreview}</div>
-                <div class="ms-auto rule-occurrence-count counter">${itemsCount} occ.</div>
+                <div class="ms-auto rule-occurrence-count counter">${t('common.occAbbrev', { count: itemsCount })}</div>
               </button>
             </div>
             <div id="${accordionId}-content" class="accordion-collapse collapse" aria-labelledby="${accordionId}-title">
@@ -364,12 +367,12 @@
     return createElementFromString(`
       <div>
         <div class="d-flex gap-3 flex-column">
-          <h3>Where to find this issue</h3>
+          <h3>${t('itemCard.whereToFind')}</h3>
           ${item.screenshotPath ? createScreenshotSection(item.screenshotPath) : ''}
           ${item.xpath ? createXpathSection(item.xpath) : ''}
 
           <div class="d-flex justify-content-between g-one modal-view">
-            <div class="fw-semibold">URL</div>
+            <div class="fw-semibold">${t('itemCard.url')}</div>
             <div class="page-item-card-section-content">
               <a href="${htmlEscapeString(isSafeReportHref(item.pageUrl))}" target="_blank" rel="noopener noreferrer">${htmlEscapeString(item.pageUrl)}</a>
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -386,7 +389,7 @@
           </div>
 
         <div class="d-flex justify-content-between g-one modal-view">
-            <div class="fw-semibold mb-2">HTML element</div>
+            <div class="fw-semibold mb-2">${t('itemCard.htmlElement')}</div>
             <pre class="page-item-card-section-content">
                 <code class="language-html">${htmlEscapeString(htmlElement)}</code>
             </pre>
@@ -397,7 +400,7 @@
               const showDetails = item.displayNeedsReview || ['color-contrast', 'color-contrast-enhanced', 'oobee-grading-text-contents', 'target-size', 'valid-lang', 'aria-valid-attr-value', 'aria-required-children', 'aria-prohibited-attr', 'aria-allowed-attr'].includes(aiConfig.ruleInCategory.rule);
               return showDetails && item.message
                 ? `<div class="d-flex justify-content-between g-one modal-view">
-            <div class="fw-semibold page-item-card-section-title">Details</div>
+            <div class="fw-semibold page-item-card-section-title">${t('itemCard.details')}</div>
             <div class="page-item-card-section-content">
               ${generateItemMessageElement(item.displayNeedsReview || true, item.message)}
             </div>
@@ -426,11 +429,11 @@
           <div class="accordion-item rule-modal-item">
             <div class="accordion-header" id="${accordionId}-title">
               ${normalMode ? '<button' : '<div'}
-                aria-label="Page ${index + 1}: ${htmlEscapeString(page.pageTitle)}, ${pageItemsCount} ${pageItemsCount === 1 ? 'occurrence' : 'occurrences'}"
+                aria-label="${htmlEscapeString(t('ruleModal.pageAria', { index: index + 1, title: page.pageTitle, occurrences: tCount('common.occurrenceCount', pageItemsCount) }))}"
                 class="accordion-button collapsed"
                 ${normalMode ? 'type="button"' : ''}
               >
-                <span class="sr-only visually-hidden">${pageItemsCount} ${pageItemsCount === 1 ? 'occurrence' : 'occurrences'}</span>
+                <span class="sr-only visually-hidden">${tCount('common.occurrenceCount', pageItemsCount)}</span>
                 <svg
                   class="accordion-arrow"
                   width="24"
@@ -445,7 +448,7 @@
                   />
                 </svg>
                 <div class="me-3 flex-1">${htmlEscapeString(page.metadata ? page.metadata : page.pageTitle)}</div>
-                <div class="ms-auto rule-occurrence-count counter">${pageItemsCount} occ.</div>
+                <div class="ms-auto rule-occurrence-count counter">${t('common.occAbbrev', { count: pageItemsCount })}</div>
               ${normalMode ? '</button>' : '</div>'}
             </div>
             <div id="${accordionId}-content" class="accordion-collapse collapse" aria-labelledby="${accordionId}-title">
@@ -520,7 +523,7 @@
               pageScreenshot
                 ? `<img
                     src="${htmlEscapeString(pageScreenshot)}"
-                    alt="Screenshot of ${htmlEscapeString(page.url)}"
+                    alt="${htmlEscapeString(t('ruleModal.screenshotOf', { url: page.url }))}"
                     class="custom-flow-screenshot"
                     onerror="this.onerror = null; this.remove();"
                   >`

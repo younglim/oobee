@@ -28,13 +28,13 @@
           </clipPath>
         </defs>
       </svg>
-      <h2 class="mb-0">Prioritise these issues first</h2>
+      <h2 class="mb-0"><%= t('prioritise.title') %></h2>
     </div>
     
     <div class="prioritise-issues-container">
       <div class="prioritise-issues-main">
         <div class="fw-semibold mb-3">
-          <%- include('../shared/InfoAlert', { text: 'Resolving each Must Fix issue within a criteria increases your WCAG score by 1.' }) %>
+          <%- include('../shared/InfoAlert', { text: t('prioritise.infoAlert') }) %>
         </div>
         <div id="prioritiseIssuesAccordion" class="prioritise-issues-accordion">
           <!-- Dynamically populated by script -->

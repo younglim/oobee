@@ -1,4 +1,4 @@
-<div class="segmented-tabs" role="tablist" aria-label="Crawl views">
+<div class="segmented-tabs" role="tablist" aria-label="<%= t('aboutScan.crawlViews') %>">
   <button
     type="button"
     id="seg-scanned"
@@ -10,10 +10,10 @@
     data-tab-target="#pages-scanned"
   >
     <span id="totalPagesScannedLabel">
-      N/A
+      <%= t('common.na') %>
     </span>
     <span>
-      &nbsp;Pages Scanned
+      &nbsp;<%= t('aboutScan.pagesScanned') %>
     </span>
   </button>
 
@@ -28,10 +28,10 @@
     data-tab-target="#pages-not-scanned"
   >
     <span id="totalPagesNotScannedLabel">
-      N/A
+      <%= t('common.na') %>
     </span>
     <span>
-      &nbsp;Pages Not Scanned
+      &nbsp;<%= t('aboutScan.pagesNotScanned') %>
     </span>
   </button>
 
@@ -46,10 +46,10 @@
     data-tab-target="#pages-unsupported"
   >
     <span id="totalUnsupportedDocsLabel">
-      N/A
+      <%= t('common.na') %>
     </span>
     <span>
-      &nbsp;Unsupported Documents
+      &nbsp;<%= t('aboutScan.unsupportedDocuments') %>
     </span>
   </button>
 </div>

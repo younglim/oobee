@@ -80,6 +80,7 @@ export type AllIssues = {
   inspectPresetScanDate: string;
   viewport: string;
   oobeeAppVersion: string;
+  lang?: string;
   items: {
     mustFix: Category;
     goodToFix: Category;

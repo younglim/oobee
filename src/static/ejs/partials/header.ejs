@@ -19,8 +19,8 @@
     </svg>
 
     <div class="header-copy">
-      <h1 class="header-title">Accessibility Report</h1>
-      <p class="header-subtitle">Rescan performed based on <%= inspectPresetScanDate %> WOGAA Inspect data</p>
+      <h1 class="header-title"><%= t('header.title') %></h1>
+      <p class="header-subtitle"><%= t('header.inspectSubtitle', { date: inspectPresetScanDate }) %></p>
     </div>
   <% } else { %>
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -34,6 +34,6 @@
       />
     </svg>
 
-    <h1 class="header-title">Accessibility Report</h1>
+    <h1 class="header-title"><%= t('header.title') %></h1>
   <% } %>
 </header>

@@ -2,6 +2,7 @@ import { Options } from 'yargs';
 import printMessage from 'print-message';
 import { BrowserTypes, RuleFlags, ScannerTypes } from './constants.js';
 import { cleanUpAndExit, isTelemetryDisabled } from '../utils.js';
+import { SUPPORTED_LANGUAGES, isSupportedLanguage, normalizeLanguage } from '../i18n/index.js';
 
 export const messageOptions = {
   border: false,
@@ -340,6 +341,21 @@ To obtain the JSON files, you need to base64-decode the file followed by gunzip.
     default: 0,
     demandOption: false,
     coerce: val => Number(val),
+  },
+  n: {
+    alias: 'lang',
+    describe:
+      'ISO 639-1 language code for the report and axe-core issue text (e.g. en, ja). Defaults to OOBEE_LANG env var, or en.',
+    type: 'string',
+    requiresArg: true,
+    demandOption: false,
+    coerce: (val: string) => {
+      const code = String(val).trim().toLowerCase();
+      if (!isSupportedLanguage(code)) {
+        throw new Error(`Unsupported language "${val}". Supported: ${SUPPORTED_LANGUAGES.join(', ')}.`);
+      }
+      return normalizeLanguage(code);
+    },
   },
   z: {
     alias: 'websiteTag',

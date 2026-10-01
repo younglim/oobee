@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" id="accessibility-site-report">
-  <head lang="en">
+<html lang="<%= lang %>" id="accessibility-site-report">
+  <head lang="<%= lang %>">
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Accessibility Site Report</title>
+    <title><%= t('report.title') %></title>
     <link
       rel="icon"
       type="image/svg+xml"
@@ -71,10 +71,10 @@
 
       const scanDataCategorySelector = () => {
         const formattedCategoryTitles = {
-          mustFix: 'Must Fix',
-          goodToFix: 'Good to Fix',
-          needsReview: 'Manual Review Required',
-          passed: 'Passed',
+          mustFix: t('common.category.mustFix'),
+          goodToFix: t('common.category.goodToFix'),
+          needsReview: t('common.category.needsReview'),
+          passed: t('common.category.passed'),
         };
 
         const scategoryList = document.getElementById('categorySelector');
@@ -149,9 +149,12 @@
               spanInfo.className = 'category-information';
 
               if (categoryData.totalItems !== 0) {
-                spanInfo.textContent = `${categoryData.rules.length} ${categoryData.rules.length === 1 ? 'issue' : 'issues'} / ${categoryData.totalItems} ${categoryData.totalItems === 1 ? 'occurrence' : 'occurrences'}`;
+                spanInfo.textContent = t('categorySelector.summary', {
+                  issues: tCount('common.issueCount', categoryData.rules.length),
+                  occurrences: tCount('common.occurrenceCount', categoryData.totalItems),
+                });
               } else if (categoryData.totalItems === 0) {
-                spanInfo.textContent = `0 issues`;
+                spanInfo.textContent = tCount('common.issueCount', 0);
               }
 
               button.appendChild(divFlex);
@@ -188,9 +191,13 @@
               spanInfo.className = 'category-information';
 
               if (categoryData.totalItems !== 0) {
-                spanInfo.textContent = `(${categoryData.rules.length} ${categoryData.rules.length === 1 ? 'issue' : 'issues'})`;
+                spanInfo.textContent = t('categorySelector.dropdown', {
+                  issues: tCount('common.issueCount', categoryData.rules.length),
+                });
               } else if (categoryData.totalItems === 0) {
-                spanInfo.textContent = `(0 issues)`;
+                spanInfo.textContent = t('categorySelector.dropdown', {
+                  issues: tCount('common.issueCount', 0),
+                });
               }
 
               listItem.appendChild(spanTitle);

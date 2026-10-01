@@ -1,5 +1,5 @@
 import { createWriteStream } from 'fs';
-import { a11yRuleShortDescriptionMap } from '../constants/constants.js';
+import { getRuleTexts } from '../i18n/index.js';
 import type { AllIssues, RuleInfo } from './types.js';
 import type { ItemsStore } from './itemsStore.js';
 
@@ -101,7 +101,7 @@ const writeCsv = async (
             allIssues.endTime ? allIssues.endTime.toISOString() : '',
             severity || '',
             issueId || '',
-            a11yRuleShortDescriptionMap[issueId] || issueDescription || '',
+            getRuleTexts().shortDescriptionMap[issueId] || issueDescription || '',
             wcagConformance || '',
             affectedPage.url || '',
             affectedPage.pageTitle || 'No page title',
@@ -133,7 +133,7 @@ const writeCsv = async (
             allIssues.endTime ? allIssues.endTime.toISOString() : '',
             severity || '',
             issueId || '',
-            a11yRuleShortDescriptionMap[issueId] || issueDescription || '',
+            getRuleTexts().shortDescriptionMap[issueId] || issueDescription || '',
             wcagConformance || '',
             affectedPage.url || '',
             affectedPage.pageTitle || 'No page title',

@@ -74,7 +74,7 @@
       thumb.className = 'custom-flow-thumb';
       const img = document.createElement('img');
       img.className = 'custom-flow-screenshot';
-      img.setAttribute('alt', `Screenshot of ${page.url ?? ''}`);
+      img.setAttribute('alt', t('aboutScan.screenshotOf', { url: page.url ?? '' }));
       img.setAttribute('onerror', 'this.onerror = null; this.remove();');
       if (isSafeImgSrc(page.pageImagePath)) {
         img.setAttribute('src', page.pageImagePath);
@@ -165,7 +165,7 @@
       const li = document.createElement('li');
       const url = page.url || page;
       const title = (page.pageTitle && page.pageTitle.length) ? page.pageTitle : url;
-      const metadata = page.metadata || 'Not A Supported Document';
+      const metadata = page.metadata || t('common.notSupportedDocument');
 
       const a = document.createElement('a');
       if (isSafeHref(url)) {

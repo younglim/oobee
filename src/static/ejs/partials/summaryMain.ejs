@@ -1,5 +1,5 @@
 <div class="flex-grow-1 align-items-stretch">
-  <main aria-label="Report main content" class="d-flex flex-column flex-grow-1">
+  <main aria-label="<%= t('summary.mainAria') %>" class="d-flex flex-column flex-grow-1">
     <div class="row m-0 py-4 px-3 d-flex" style="flex-wrap: nowrap">
       <div id="aboutScanDiv" class="pe-md-2 d-flex" style="flex: 1; flex-basis: 300px">
         <div id="scanabout-compliance-card" class="card h-100" style="width: -webkit-fill-available">
@@ -9,11 +9,11 @@
       <div id="scanResultsDiv" class="ps-md-2" style="flex: 2; margin-left: 10px">
         <div id="summary-scan-results-card" class="card h-100">
           <div class="card-body">
-            <h2>Scan results</h2>
+            <h2><%= t('summary.scanResults') %></h2>
             <div class="d-flex justify-content-between align-items-center">
-              <span class="fw-bold"> WCAG (A & AA) Passes </span>
-              <span aria-label="Pass percentage" class="ms-2">
-                <%= wcagPassPercentage.totalWcagChecksAA - wcagPassPercentage.totalWcagViolationsAA  %> /  <%= wcagPassPercentage.totalWcagChecksAA %> of automated checks
+              <span class="fw-bold"> <%= t('summary.wcagPasses') %> </span>
+              <span aria-label="<%= t('summary.passPercentage') %>" class="ms-2">
+                <%= t('summary.automatedChecks', { passed: wcagPassPercentage.totalWcagChecksAA - wcagPassPercentage.totalWcagViolationsAA, total: wcagPassPercentage.totalWcagChecksAA }) %>
               </span>
             </div>
             <div class="wcag-compliance-passes-bar mb-5 d-flex">
@@ -34,14 +34,12 @@
       </div>
     </div>
     <div class="mx-3">
-      <h2 class="mb-2">Summary of issues:</h2>
+      <h2 class="mb-2"><%= t('summary.summaryOfIssues') %></h2>
       <p>
-        Only 
-        <a href="https://go.gov.sg/oobee-details" target="_blank">20 WCAG 2.2 Success Criteria (A & AA)</a>
-        can be automatically checked so
-        <a aria-label="Manual testing guide" href="https://go.gov.sg/a11y-manual-testing" target="_blank">manual
-          testing</a>
-        is still required. For more details, please refer to the HTML report.
+        <%- t('summary.intro', {
+          criteriaLink: '<a href="https://go.gov.sg/oobee-details" target="_blank">' + escapeFn(t('summary.criteriaLink')) + '</a>',
+          manualLink: '<a aria-label="' + escapeFn(t('summary.manualTestingGuide')) + '" href="https://go.gov.sg/a11y-manual-testing" target="_blank">' + escapeFn(t('summary.manualTestingLink')) + '</a>'
+        }) %>
       </p>
     </div>
     <%- include("components/summaryTable") %>

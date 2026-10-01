@@ -3,7 +3,7 @@ import path from 'path';
 import zlib from 'zlib';
 import { Base64Encode } from 'base64-stream';
 import { pipeline } from 'stream/promises';
-import { a11yRuleShortDescriptionMap } from '../constants/constants.js';
+import { getRuleTexts } from '../i18n/index.js';
 import { consoleLogger } from '../logs.js';
 import type { AllIssues } from './types.js';
 import type { ItemsStore } from './itemsStore.js';
@@ -317,6 +317,7 @@ const writeJsonAndBase64Files = async (
     }
   });
 
+  const a11yRuleShortDescriptionMap = getRuleTexts(allIssues.lang).shortDescriptionMap;
   const scanIssuesSummary = {
     mustFix: items.mustFix.rules.map(({ pagesAffected, ...ruleInfo }) => ({
       ...ruleInfo,

@@ -5,18 +5,54 @@ export function getAxeConfiguration({
   enableWcagAaa = false,
   gradingReadabilityFlag = '',
   disableOobee = false,
+  locale = undefined,
+  oobeeTexts = undefined,
 }: {
   enableWcagAaa?: boolean;
   gradingReadabilityFlag?: string;
   disableOobee?: boolean;
+  // axe-core locale object (e.g. axe-core/locales/ja.json); omitted for English
+  locale?: Record<string, any>;
+  // Translations for Oobee custom rules/checks (see src/i18n/locales/<lang>/axeOobee.json)
+  oobeeTexts?: {
+    rules?: Record<string, { description?: string; help?: string }>;
+    checks?: Record<string, { pass?: string; fail?: string }>;
+    runtime?: Record<string, string>;
+  };
 }) {
+  // This function is serialised with .toString() and eval'd in the browser,
+  // so it must stay self-contained (no imports/closures over module scope).
+  const ruleText = (id: string, key: 'description' | 'help', fallback: string): string =>
+    oobeeTexts?.rules?.[id]?.[key] || fallback;
+  const checkText = (id: string, key: 'pass' | 'fail', fallback: string): string =>
+    oobeeTexts?.checks?.[id]?.[key] || fallback;
+  const runtimeText = (key: string, fallback: string): string =>
+    oobeeTexts?.runtime?.[key] || fallback;
+
   function getReadabilityInterpretation(score: string): string {
     const num = parseFloat(score);
     if (Number.isNaN(num)) return '';
-    if (num > 30) return 'It is targeted for junior college (JC) level comprehension and above.';
-    return 'It is targeted for university graduate level comprehension and above.';
+    if (num > 30) {
+      return runtimeText(
+        'readabilityJC',
+        'It is targeted for junior college (JC) level comprehension and above.',
+      );
+    }
+    return runtimeText(
+      'readabilityUniversity',
+      'It is targeted for university graduate level comprehension and above.',
+    );
+  }
+  function getReadabilityFailMessage(score: string): string {
+    return runtimeText(
+      'readabilityGradingFail',
+      'Text content is potentially difficult to read.\n  It scored {{score}} out of 50 on the Flesch-Kincaid Readability Test.\n  {{interpretation}}',
+    )
+      .replace('{{score}}', score)
+      .replace('{{interpretation}}', getReadabilityInterpretation(score));
   }
   return {
+    ...(locale ? { locale } : {}),
     branding: {
       application: 'oobee',
     },
@@ -26,8 +62,12 @@ export function getAxeConfiguration({
         metadata: {
           impact: 'serious' as ImpactValue,
           messages: {
-            pass: 'The image alt text is probably useful.',
-            fail: "The image alt text set as 'img', 'image', 'picture', 'photo', or 'graphic' is confusing or not useful.",
+            pass: checkText('oobee-confusing-alt-text', 'pass', 'The image alt text is probably useful.'),
+            fail: checkText(
+              'oobee-confusing-alt-text',
+              'fail',
+              "The image alt text set as 'img', 'image', 'picture', 'photo', or 'graphic' is confusing or not useful.",
+            ),
           },
         },
         evaluate: evaluateAltText,
@@ -37,8 +77,12 @@ export function getAxeConfiguration({
         metadata: {
           impact: 'serious' as ImpactValue,
           messages: {
-            pass: 'The clickable element has an accessible label.',
-            fail: 'The clickable element does not have an accessible label.',
+            pass: checkText('oobee-accessible-label', 'pass', 'The clickable element has an accessible label.'),
+            fail: checkText(
+              'oobee-accessible-label',
+              'fail',
+              'The clickable element does not have an accessible label.',
+            ),
           },
         },
         evaluate: (node: HTMLElement) => {
@@ -52,9 +96,9 @@ export function getAxeConfiguration({
             metadata: {
               impact: 'moderate' as ImpactValue,
               messages: {
-                pass: 'The text content is easy to understand.',
-                fail: `Text content is potentially difficult to read.\n  It scored ${gradingReadabilityFlag} out of 50 on the Flesch-Kincaid Readability Test.\n  ${getReadabilityInterpretation(gradingReadabilityFlag)}`,
-                incomplete: `Text content is potentially difficult to read.\n  It scored ${gradingReadabilityFlag} out of 50 on the Flesch-Kincaid Readability Test.\n  ${getReadabilityInterpretation(gradingReadabilityFlag)}`,
+                pass: checkText('oobee-grading-text-contents', 'pass', 'The text content is easy to understand.'),
+                fail: getReadabilityFailMessage(gradingReadabilityFlag),
+                incomplete: getReadabilityFailMessage(gradingReadabilityFlag),
               },
             },
             evaluate: (_node: HTMLElement) => false,
@@ -71,8 +115,16 @@ export function getAxeConfiguration({
         any: ['oobee-confusing-alt-text'],
         tags: ['wcag2a', 'wcag111'],
         metadata: {
-          description: 'Ensures image alt text is clear and useful.',
-          help: 'Image alt text must not be vague or unhelpful.',
+          description: ruleText(
+            'oobee-confusing-alt-text',
+            'description',
+            'Ensures image alt text is clear and useful.',
+          ),
+          help: ruleText(
+            'oobee-confusing-alt-text',
+            'help',
+            'Image alt text must not be vague or unhelpful.',
+          ),
           helpUrl: 'https://www.deque.com/blog/great-alt-text-introduction/',
         },
       },
@@ -83,8 +135,16 @@ export function getAxeConfiguration({
         any: ['oobee-accessible-label'],
         tags: ['wcag2a', 'wcag211', 'wcag412'],
         metadata: {
-          description: 'Ensures clickable elements have an accessible label.',
-          help: 'Clickable elements must have accessible labels.',
+          description: ruleText(
+            'oobee-accessible-label',
+            'description',
+            'Ensures clickable elements have an accessible label.',
+          ),
+          help: ruleText(
+            'oobee-accessible-label',
+            'help',
+            'Clickable elements must have accessible labels.',
+          ),
           helpUrl: 'https://www.deque.com/blog/accessible-aria-buttons',
         },
       },
@@ -96,9 +156,16 @@ export function getAxeConfiguration({
             any: ['oobee-grading-text-contents'],
             tags: ['wcag2aaa', 'wcag315'],
             metadata: {
-              description:
+              description: ruleText(
+                'oobee-grading-text-contents',
+                'description',
                 'Text content should be easy to understand for individuals with education levels up to university graduates. If the text content is difficult to understand, provide supplemental content or a version that is easy to understand.',
-              help: 'Text content should be clear and plain to ensure that it is easily understood.',
+              ),
+              help: ruleText(
+                'oobee-grading-text-contents',
+                'help',
+                'Text content should be clear and plain to ensure that it is easily understood.',
+              ),
               helpUrl: 'https://www.wcag.com/uncategorized/3-1-5-reading-level/',
             },
           }]

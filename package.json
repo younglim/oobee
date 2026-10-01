@@ -106,7 +106,7 @@
   "scripts": {
     "build": "npm run copyfiles && tsc",
     "build:watch": "npm run build -- --watch",
-    "copyfiles": "node ./scripts/copyFiles.js src/static/ejs dist/static && node ./scripts/copyFiles.js src/constants/errorMeta.json dist/constants && node ./scripts/copyFiles.js exclusions.txt dist",
+    "copyfiles": "node ./scripts/copyFiles.js src/static/ejs dist/static && node ./scripts/copyFiles.js src/constants/errorMeta.json dist/constants && node ./scripts/copyFiles.js exclusions.txt dist && node ./scripts/copyFiles.js src/i18n/locales dist/i18n",
     "start": "node --max-old-space-size=10000 dist/index.js",
     "cli": "node --max-old-space-size=10000 dist/cli.js",
     "test": "node --experimental-vm-modules ./node_modules/.bin/jest",

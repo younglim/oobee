@@ -1,11 +1,11 @@
 <div id="wcag-compliance-card" class="card h-100 p-3">
-  <h2 class="mb-0">WCAG Compliance</h2>
+  <h2 class="mb-0"><%= t('summary.wcagCompliance') %></h2>
   <div class="wcag-compliance-passes-panel">
     <div class="d-flex justify-content-between align-items-center">
       <div class="d-flex align-items-center">
-        <span class="fw-bold">WCAG (A & AA) Passes</span>
+        <span class="fw-bold"><%= t('summary.wcagPasses') %></span>
         <button
-          aria-label="More on automated testing WCAG coverage"
+          aria-label="<%= t('summary.moreOnCoverage') %>"
           id="wcagModalToggle"
           class="ms-2"
           data-bs-toggle="modal"
@@ -25,7 +25,7 @@
           </svg>
         </button>
       </div>
-          <span aria-label="Pass percentage" class="ms-2"><%= wcagPassPercentage %>%</span>
+          <span aria-label="<%= t('summary.passPercentage') %>" class="ms-2"><%= wcagPassPercentage %>%</span>
     </div>
     <div class="wcag-compliance-passes-bar">
       <div
@@ -50,7 +50,7 @@
       </div>
       <div class="modal-body">
         <div>
-          Only 19 WCAG 2.2 Success Criteria can be checked reasonably through automated testing:
+          <%= t('summary.coverageModalIntro') %>
         </div>
         <div class="accordion my-3" id="wcagLinksAccordion">
           <div class="accordion-item">
@@ -63,7 +63,7 @@
                 aria-expanded="false"
                 aria-controls="wcagLinksAccordionContent"
               >
-                19 WCAG Success Criteria (A & AA)
+                <%= t('summary.coverageAccordionTitle') %>
               </button>
             </div>
             <div
@@ -85,8 +85,7 @@
           </div>
         </div>
         <div>
-          <strong>Manual testing is still recommended</strong> as they involve subjective judgements
-          and human interpretation, which cannot be fully automated.
+          <strong><%= t('summary.manualStillRecommended') %></strong> <%= t('summary.manualStillRecommendedTail') %>
         </div>
       </div>
     </div>

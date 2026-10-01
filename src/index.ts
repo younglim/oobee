@@ -53,6 +53,7 @@ export type Answers = {
   generateJsonFiles: boolean;
   scanDuration?: number;
   websiteTag?: string;
+  lang?: string;
 };
 
 export type Data = {

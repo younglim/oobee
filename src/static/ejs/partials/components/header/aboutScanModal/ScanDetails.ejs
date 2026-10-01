@@ -1,12 +1,12 @@
 <aside id="scan-about" class="about-scan-details-left">
-  <h1 id="aboutScanModalLabel">About this scan</h1>
+  <h1 id="aboutScanModalLabel"><%= t('aboutScan.title') %></h1>
   <ul>
     <li>
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M14.2222 0H1.77778C0.791111 0 0 0.8 0 1.77778V14.2222C0 15.2 0.791111 16 1.77778 16H14.2222C15.2 16 16 15.2 16 14.2222V1.77778C16 0.8 15.2089 0 14.2222 0ZM14.2222 14.2222H1.77778V3.55556H14.2222V14.2222ZM12.4444 8H3.55556V6.22222H12.4444V8ZM8.88889 11.5556H3.55556V9.77778H8.88889V11.5556Z" fill="#686868"/>
       </svg>
       <span id="websiteTitle" class="website-title">
-        N/A
+        <%= t('common.na') %>
       </span>
     </li>
 
@@ -16,7 +16,7 @@
       </svg>
       <a id="urlScanned" href="#" target="_blank" rel="noopener noreferrer">
         <span id="urlScannedText" class="url-scanned-text">
-          N/A
+          <%= t('common.na') %>
         </span>
         <svg class="link-external-icon" width="16" height="12" viewBox="0 0 8 8" aria-hidden="true" focusable="false">
           <path d="M7.11111 7.11111H0.888889V0.888889H4V0H0.888889C0.395556 0 0 0.4 0 0.888889V7.11111C0 7.6 0.395556 8 0.888889 8H7.11111C7.6 8 8 7.6 8 7.11111V4H7.11111V7.11111ZM4.88889 0V0.888889H6.48444L2.11556 5.25778L2.74222 5.88444L7.11111 1.51556V3.11111H8V0H4.88889Z" fill="#5735DF"/>
@@ -29,7 +29,7 @@
         <path d="M8.25 4H7V8.59016L11.375 11L12 10.059L8.25 8.01639V4Z" fill="#4E4E4E"/>
       </svg>
       <span id="aboutStartTime">
-        N/A
+        <%= t('common.na') %>
       </span>
     </li>
 
@@ -53,7 +53,7 @@
           </svg>
         <% } %>
         <span id="viewport-text">
-          N/A
+          <%= t('common.na') %>
         </span>
       </li>
     <% } %>
@@ -70,7 +70,7 @@
       >
         <div class="d-flex">
           <div class="about-scan-link-row">
-            <span id="pagesScannedModalToggleTxt" class="about-us-type-of-scan-text">N/A</span>
+            <span id="pagesScannedModalToggleTxt" class="about-us-type-of-scan-text"><%= t('common.na') %></span>
             <svg class="about-scan-link-chev" width="10" height="12" viewBox="0 0 6 10" aria-hidden="true" focusable="false">
               <path d="M0.726562 7.06L3.7799 4L0.726562 0.94L1.66656 0L5.66656 4L1.66656 8L0.726562 7.06Z" fill="#5735DF"/>
             </svg>
@@ -87,27 +87,27 @@
 
         <div class="advanced-group-content">
           <div>
-            Advanced scan options enabled
+            <%= t('aboutScan.advancedEnabled') %>
           </div>
 
           <ul class="advanced-sublist">
             <% if (advancedScanOptionsSummaryItems.showIncludeScreenshots) { %>
-              <li class="advanced-sublist-li">Include screenshots</li>
+              <li class="advanced-sublist-li"><%= t('aboutScan.includeScreenshots') %></li>
             <% } %>
             <% if (advancedScanOptionsSummaryItems.showAllowSubdomains) { %>
-              <li class="advanced-sublist-li">Allow subdomains for scans</li>
+              <li class="advanced-sublist-li"><%= t('aboutScan.allowSubdomains') %></li>
             <% } %>
             <% if (advancedScanOptionsSummaryItems.showEnableCustomChecks) { %>
-              <li class="advanced-sublist-li">Enable custom checks</li>
+              <li class="advanced-sublist-li"><%= t('aboutScan.enableCustomChecks') %></li>
             <% } %>
             <% if (advancedScanOptionsSummaryItems.showEnableWcagAaa) { %>
-              <li class="advanced-sublist-li">Enable WCAG AAA checks</li>
+              <li class="advanced-sublist-li"><%= t('aboutScan.enableWcagAaa') %></li>
             <% } %>
             <% if (advancedScanOptionsSummaryItems.showSlowScanMode) { %>
-              <li class="advanced-sublist-li">Slow scan mode</li>
+              <li class="advanced-sublist-li"><%= t('aboutScan.slowScanMode') %></li>
             <% } %>
             <% if (advancedScanOptionsSummaryItems.showAdhereRobots) { %>
-              <li class="advanced-sublist-li">Adhere to robots.txt</li>
+              <li class="advanced-sublist-li"><%= t('aboutScan.adhereRobots') %></li>
             <% } %>
           </ul>
         </div>
@@ -125,11 +125,11 @@
         aria-expanded="false"
       >
         <span class="wcag-criteria-label">
-          WCAG Automated Testing
+          <%= t('aboutScan.wcagAutomatedTesting') %>
         </span>
         <div class="about-scan-link-row">
           <span class="about-scan-link-text">
-            20 (A &amp; AA) and 6 (AAA) Criteria
+            <%= t('aboutScan.criteriaSummary') %>
           </span>
           <svg class="about-scan-link-chev" width="10" height="12" viewBox="0 0 6 10" aria-hidden="true" focusable="false">
             <path d="M0.726562 7.06L3.7799 4L0.726562 0.94L1.66656 0L5.66656 4L1.66656 8L0.726562 7.06Z" fill="#5735DF"/>
@@ -143,7 +143,7 @@
     </li>
 
     <li>
-      <span id="oobeeAppVersion" class="oobee-version-text">N/A</span>
+      <span id="oobeeAppVersion" class="oobee-version-text"><%= t('common.na') %></span>
     </li>
 
     <li id = "cypressScanAboutMetadata"></li>

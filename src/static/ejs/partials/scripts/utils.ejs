@@ -1,5 +1,37 @@
 <%# utility functions %>
 <script>
+  // i18n: the whole "ui" locale bundle (already merged with English fallbacks) is embedded here.
+  const uiStrings = <%- JSON.stringify(typeof uiBundle !== 'undefined' ? uiBundle : {}).replace(/</g, '\\u003c') %>;
+
+  // Dotted-key lookup with {{var}} interpolation; falls back to the key itself.
+  // A leading "ui." is tolerated so keys match the server-side t().
+  function t(key, vars) {
+    const path = String(key).replace(/^ui\./, '').split('.');
+    let value = uiStrings;
+    for (const part of path) {
+      value = value == null ? undefined : value[part];
+    }
+    if (typeof value !== 'string') return key;
+    return vars
+      ? value.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in vars ? String(vars[k]) : m))
+      : value;
+  }
+
+  // Plural helper: expects "<key>.one" and "<key>.other" entries using {{count}}.
+  function tCount(key, count, vars) {
+    return t(`${key}.${count === 1 ? 'one' : 'other'}`, Object.assign({ count }, vars || {}));
+  }
+
+  // Localised "<a>, <b> and <c> Disability" sentence fragment.
+  function formatDisabilityList(disabilities) {
+    const names = disabilities.map(d => t(`disability.names.${d}`) === `disability.names.${d}` ? d : t(`disability.names.${d}`));
+    if (names.length === 1) return t('disability.one', { a: names[0] });
+    if (names.length === 2) return t('disability.two', { a: names[0], b: names[1] });
+    const list = [...names];
+    const last = list.pop();
+    return t('disability.many', { list: list.join(', '), last });
+  }
+
   function createElementFromString(htmlString) {
     const tempContainer = document.createElement('div');
     tempContainer.innerHTML = htmlString.trim();
@@ -101,9 +133,9 @@
       .getElementById(buttonsDiv)
       .replaceChildren(
         createElementFromString(
-          `<p class="aiFeedbackResponse">You rated this AI suggestion ${isUseful ? 'useful': 'not useful'}. <a class="undoAiFeedback" href="#" onclick="undoAiFeedback(\'${buttonsDiv}\', \'${ruleId}\', \'${escapeHtmlForAI(
+          `<p class="aiFeedbackResponse">${isUseful ? t('ai.ratedUseful') : t('ai.ratedNotUseful')} <a class="undoAiFeedback" href="#" onclick="undoAiFeedback(\'${buttonsDiv}\', \'${ruleId}\', \'${escapeHtmlForAI(
               basicHtml,
-            )}\')">Undo</a></p>`,
+            )}\')">${t('ai.undo')}</a></p>`,
         ),
       );
   };
@@ -141,7 +173,7 @@
               fill="#9021a6"
             />
           </svg>
-          Useful</button
+          ${t('ai.useful')}</button
         >    <button class="aiFeedbackButton" style="margin-left:16px" onClick="logAiResponseFeedback('notUseful', '${ruleId}', '${buttonDiv}', '${basicHtml}')">
           <svg
             width="16"
@@ -155,7 +187,7 @@
               fill="#9021a6"
             />
           </svg>
-          Not useful
+          ${t('ai.notUseful')}
         </button>`;
   };
 
@@ -294,7 +326,7 @@
         .getElementById(aiErrorDiv)
         .replaceChildren(
           createElementFromString(
-            `<div class="generateAiError">This feature requires internet connection. Please try again</div>`,
+            `<div class="generateAiError">${t('ai.requiresInternet')}</div>`,
           ),
         );
     } else if (oobeeAiQueryLabel.hasNetworkError) {
@@ -302,11 +334,11 @@
         .getElementById(aiErrorDiv)
         .replaceChildren(
           createElementFromString(
-            `<div class="generateAiError">Something went wrong. Please try again</div>`,
+            `<div class="generateAiError">${t('ai.somethingWentWrong')}</div>`,
           ),
         );
     } else if (!oobeeAiQueryLabel.label) {
-      document.getElementById(accordionDiv).innerHTML = `<span class="processAI">Processing AI suggestions, please check back later.</span>`
+      document.getElementById(accordionDiv).innerHTML = `<span class="processAI">${t('itemCard.processingAi')}</span>`
     } else {
       await getPurpleAiAnswer(ruleId, accordionDiv, oobeeAiQueryLabel.label, buttonsDiv, aiErrorDiv);
     }
@@ -315,7 +347,7 @@
   const getPurpleAiAnswer = async (ruleId, accordionDiv, ruleHtmlLabel, buttonsDiv, aiErrorDiv, html) => {
     const storagePath = '<%= storagePath %>';
     document.getElementById(buttonsDiv).disabled = true;
-    document.getElementById(buttonsDiv).textContent = 'Generating...';
+    document.getElementById(buttonsDiv).textContent = t('itemCard.generating');
 
     api(apiUrls.getRuleIdData(ruleId))
       .then(ruleIdData => {
@@ -336,13 +368,13 @@
           const aiVoteFeedback = JSON.parse(localStorage.getItem(storagePath));
           if (aiVoteFeedback && aiVoteFeedback[buttonsDiv]) {
             var voteString = aiVoteFeedback[buttonsDiv] === 'useful' ?
-              `You rated this AI suggestion useful. ` :
-              `You rated this AI suggestion not useful. `;
+              `${t('ai.ratedUseful')} ` :
+              `${t('ai.ratedNotUseful')} `;
             const votedElem = createElementFromString(`
               <div id=${buttonsDiv} style="display: flex;justify-content: flex-end;margin-top: 16px;">
                 <p class="aiFeedbackResponse">${voteString}<a class="undoAiFeedback" href="#" onclick="undoAiFeedback(\'${buttonsDiv}\', \'${ruleId}\', \'${escapeHtmlForAI(
                         ruleHtmlLabel,
-                      )}\')">Undo</a>
+                      )}\')">${t('ai.undo')}</a>
                 </p>
               </div>
             `)
@@ -363,7 +395,7 @@
                       fill="#9021a6"
                     />
                   </svg>
-                  Useful
+                  ${t('ai.useful')}
                 </button>
                 <button class="aiFeedbackButton" style="margin-left:16px" onClick="logAiResponseFeedback('notUseful', '${ruleId}', '${buttonsDiv}', '${replacedRuleHtmlLabel}')">
                   <svg
@@ -378,7 +410,7 @@
                       fill="#9021a6"
                     />
                   </svg>
-                  Not useful
+                  ${t('ai.notUseful')}
                 </button>
               </div>
             `);
@@ -393,10 +425,10 @@
         console.log('Error fetching AI response', err);
         document.getElementById(buttonsDiv).disabled = false;
         document.getElementById(buttonsDiv).style = `border: 1px solid #6E52EF;color: #6E52EF;`;
-        document.getElementById(buttonsDiv).textContent = 'Generate response';
+        document.getElementById(buttonsDiv).textContent = t('itemCard.generateResponse');
         const errorMessageToDisplay = err.message === 'Network Error'
-          ? 'This feature requires internet connection. Please try again'
-          : 'Something went wrong. Please try again.'
+          ? t('ai.requiresInternet')
+          : t('ai.somethingWentWrongPeriod')
         document
           .getElementById(aiErrorDiv)
           .replaceChildren(
@@ -408,14 +440,7 @@
   }
 
   function getFormattedCategoryTitle(category) {
-    const titles = {
-      mustFix: 'Must Fix',
-      goodToFix: 'Good to Fix',
-      needsReview: 'Manual Review Required',
-      passed: 'Passed',
-    };
-
-    return titles[category];
+    return t(`common.category.${category}`);
   }
 
   function escapeHtmlStringForArg(string) {

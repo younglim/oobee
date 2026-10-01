@@ -169,21 +169,21 @@
   function createPaginationControls(totalItems) {
     return createElementFromString(`
       <div class="item-pagination-controls">
-        <div class="mr-1">Occurrence no.</div>
-        <button class="pagination-arrow pagination-prev" aria-label="Previous item" disabled>
+        <div class="mr-1">${t('itemCard.occurrenceNo')}</div>
+        <button class="pagination-arrow pagination-prev" aria-label="${t('itemCard.previousItem')}" disabled>
             <svg width="8" height="12" viewBox="0 0 8 12" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M7.41 1.41L6 0L0 6L6 12L7.41 10.59L2.83 6L7.41 1.41Z" fill="#4D34BF"/>
             </svg>
         </button>
         <div class="pagination-page-info">
-          <input type="number" class="pagination-page-input" value="1" min="1" max="${totalItems}" aria-label="Current page number" />
+          <input type="number" class="pagination-page-input" value="1" min="1" max="${totalItems}" aria-label="${t('itemCard.currentPageNumber')}" />
         </div>
-        <button class="pagination-arrow pagination-next" aria-label="Next item" ${totalItems <= 1 ? 'disabled' : ''}>
+        <button class="pagination-arrow pagination-next" aria-label="${t('itemCard.nextItem')}" ${totalItems <= 1 ? 'disabled' : ''}>
             <svg width="8" height="12" viewBox="0 0 8 12" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M1.41 0L0 1.41L4.58 6L0 10.59L1.41 12L7.41 6L1.41 0Z" fill="#4D34BF"/>
             </svg>
         </button>
-        <div class="mr-1">of ${totalItems}</div>
+        <div class="mr-1">${t('itemCard.ofTotal', { total: totalItems })}</div>
       </div>
     `);
   }
@@ -234,7 +234,7 @@
     return createElementFromString(`
       <div>
         <div class="d-flex gap-3 flex-column">
-        <h3>Where to find this issue</h3>
+        <h3>${t('itemCard.whereToFind')}</h3>
           ${item.screenshotPath ? createScreenshotSection(item.screenshotPath) : ''}
           ${item.xpath ? createXpathSection(item.xpath) : ''}
           ${createElementSection(item)}
@@ -243,7 +243,7 @@
               const showDetails = item.displayNeedsReview || ['color-contrast', 'color-contrast-enhanced', 'oobee-grading-text-contents', 'target-size', 'valid-lang', 'aria-valid-attr-value', 'aria-required-children', 'aria-prohibited-attr', 'aria-allowed-attr'].includes(aiConfig.ruleInCategory.rule);
               return showDetails && item.message
                 ? `<div class="d-flex justify-content-between g-one">
-            <div class="fw-semibold page-item-card-section-title">Details</div>
+            <div class="fw-semibold page-item-card-section-title">${t('itemCard.details')}</div>
             <div class="page-item-card-section-content">
               ${generateItemMessageElement(item.displayNeedsReview || true, item.message)}
             </div>
@@ -262,12 +262,12 @@
     return `
       <div class="hide-on-img-error">
         <div class="d-flex justify-content-between g-one modal-view">
-          <div class="fw-semibold">Screenshot</div>
+          <div class="fw-semibold">${t('itemCard.screenshot')}</div>
           <div class="page-item-card-section-content bg-grey-w-border">
             <img
               src="${screenshotPath}"
               onerror="this.onerror = null; this.closest('div.hide-on-img-error').remove();"
-              alt="Screenshot of affected element" />
+              alt="${t('itemCard.screenshotAlt')}" />
           </div>
         </div>
       </div>
@@ -277,16 +277,16 @@
   function createXpathSection(xpath) {
     return `
       <div class="d-flex justify-content-between g-one modal-view">
-        <div class="fw-semibold">Path</div>
+        <div class="fw-semibold">${t('itemCard.path')}</div>
         <div class="page-item-card-section-content">
           <div class="g-one path-container">
             ${htmlEscapeString(xpath)}
             <button
-              aria-label="Copy path to clipboard"
+              aria-label="${t('itemCard.copyPath')}"
               class="copy-button"
               data-bs-toggle="tooltip"
               data-bs-placement="top"
-              data-bs-original-title="Copy"
+              data-bs-original-title="${t('itemCard.copy')}"
             >
             <svg width="13" height="15" viewBox="0 0 13 15" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M3.33333 0H11.3333C12.0667 0 12.6667 0.6 12.6667 1.33333V10.6667H11.3333V1.33333H3.33333V0ZM1.33333 2.66667H8.66667C9.4 2.66667 10 3.26667 10 4V13.3333C10 14.0667 9.4 14.6667 8.66667 14.6667H1.33333C0.600001 14.6667 9.53674e-07 14.0667 9.53674e-07 13.3333V4C9.53674e-07 3.26667 0.600001 2.66667 1.33333 2.66667ZM1.33333 13.3333H8.66667V4H1.33333V13.3333Z" fill="#5735DF"/>
@@ -304,16 +304,16 @@
         ${
           item.html
             ? `
-          <div class="fw-semibold">HTML element</div>
+          <div class="fw-semibold">${t('itemCard.htmlElement')}</div>
           <pre class="page-item-card-section-content">
             <code class="language-html">
               ${htmlEscapeString(item.html)}
             </code>
           </pre>`
             : `
-          <div class="fw-semibold">Location</div>
+          <div class="fw-semibold">${t('itemCard.location')}</div>
           <div class="page-item-card-section-content">
-            ${item.page > 0 ? `Page ${item.page}` : 'Document'}
+            ${item.page > 0 ? t('itemCard.pageNumber', { page: item.page }) : t('itemCard.document')}
           </div>`
         }
       </div>
@@ -336,7 +336,7 @@
             '${buttonDivForAiFeedback}',
             '${aiErrorDiv}')"
         >
-          Generate response
+          ${t('itemCard.generateResponse')}
         </button>
         <div id="${aiErrorDiv}"></div>
       `;
@@ -352,21 +352,21 @@
             '${buttonDivForAiFeedback}',
             '${aiErrorDiv}')"
         >
-          Generate response
+          ${t('itemCard.generateResponse')}
         </button>
         <div id="${aiErrorDiv}"></div>
       `;
     } else {
       aiContent = `
         <span class="processAI">
-          Processing AI suggestions, please check back later.
+          ${t('itemCard.processingAi')}
         </span>
       `;
     }
 
     return `
       <div class="d-flex g-one">
-        <div class="fw-semibold page-item-card-section-title">AI suggestion</div>
+        <div class="fw-semibold page-item-card-section-title">${t('itemCard.aiSuggestion')}</div>
         <div id="${accordionDivToAppendAI}" class="page-item-card-section-content">
           ${aiContent}
         </div>
@@ -379,7 +379,7 @@
 
     return `
       <div class="d-flex g-one genai-fix-section">
-        <div class="fw-semibold page-item-card-section-title">Generative AI Fix</div>
+        <div class="fw-semibold page-item-card-section-title">${t('itemCard.genAiFix')}</div>
         <div id="${genAiAccordionDiv}" class="page-item-card-section-content">
           <button
             id="${genAiButtonDiv}"
@@ -391,7 +391,7 @@
               '${genAiButtonDiv}',
               '${genAiErrorDiv}')"
           >
-            Gen AI Suggest Fix
+            ${t('itemCard.genAiSuggestFix')}
           </button>
           <div id="${genAiErrorDiv}"></div>
         </div>
@@ -415,12 +415,12 @@
       textToCopy.select();
       navigator.clipboard.writeText(textToCopy.value);
 
-      copyButtonElem.setAttribute('data-bs-original-title', 'Copied');
+      copyButtonElem.setAttribute('data-bs-original-title', t('itemCard.copied'));
       copyTooltipItem.update();
       copyTooltipItem.show();
 
       setTimeout(() => {
-        copyButtonElem.setAttribute('data-bs-original-title', 'Copy');
+        copyButtonElem.setAttribute('data-bs-original-title', t('itemCard.copy'));
         copyTooltipItem.update();
       }, 1500);
     };

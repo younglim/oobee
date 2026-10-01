@@ -28,7 +28,7 @@
     const container = screenshot.closest('.custom-flow-screenshot-container');
     const link = container ? container.querySelector('.display-url-container a') : null;
 
-    const pageTitle = link?.textContent?.trim() || screenshot.getAttribute('alt') || 'Screenshot';
+    const pageTitle = link?.textContent?.trim() || screenshot.getAttribute('alt') || t('lightbox.screenshotFallback');
     const pageUrl = link?.href || '';
 
     openLightbox(screenshot.src, pageTitle, pageUrl);
@@ -87,7 +87,7 @@
     lightbox.style.display = 'block';
 
     lightboxImg.src = imgSrc;
-    lightboxImg.alt = `Screenshot of ${pageUrl}`;
+    lightboxImg.alt = t('lightbox.imageAlt', { url: pageUrl });
 
     lightboxTitle.textContent = pageTitle;
   };

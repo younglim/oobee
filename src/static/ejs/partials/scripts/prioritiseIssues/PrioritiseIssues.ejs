@@ -80,7 +80,7 @@
     const accordionHTML = failedCriteria
       .map((criteria, index) => {
         const wcagScore = criteria.id.replace('WCAG ', '');
-        const issueWord = criteria.issues.length === 1 ? 'issue' : 'issues';
+        const issueCountText = tCount('common.issueCount', criteria.issues.length);
 
         const issuesListHTML = criteria.issues
           .map(issue => {
@@ -89,7 +89,7 @@
               disabilities.length > 0
                 ? `
               <div class="priority-issue-badges">
-                ${disabilities.map(disability => `<span class="disability-badge">${escHtml(disability)} Disability</span>`).join('')}
+                ${disabilities.map(disability => `<span class="disability-badge">${escHtml(formatDisabilityList([disability]))}</span>`).join('')}
               </div>
             `
                 : '';
@@ -118,9 +118,9 @@
                 aria-expanded="false"
                 aria-controls="collapse${index}"
               >
-                <span class="h4 mb-0">WCAG ${escHtml(wcagScore)} -&nbsp;</span>
-                <span class="h4 fw-normal mb-0">${criteria.issues.length} ${issueWord}</span>
-                <span class="wcag-score-badge">-1 WCAG Score</span>
+                <span class="h4 mb-0">${escHtml(t('prioritise.criteriaHeading', { score: wcagScore }))}&nbsp;</span>
+                <span class="h4 fw-normal mb-0">${issueCountText}</span>
+                <span class="wcag-score-badge">${escHtml(t('prioritise.scoreBadge'))}</span>
                 <svg class="accordion-icon-collapsed" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M7.41 8.58984L12 13.1698L16.59 8.58984L18 9.99984L12 15.9998L6 9.99984L7.41 8.58984Z" fill="#5735DF"/>
                 </svg>
@@ -135,7 +135,7 @@
               data-bs-parent="#prioritiseIssuesAccordion"
             >
               <div class="accordion-body">
-                <ul class="priority-issues-list" aria-label="Priority issues">
+                <ul class="priority-issues-list" aria-label="${escHtml(t('prioritise.priorityIssuesAria'))}">
                   ${issuesListHTML}
                 </ul>
               </div>

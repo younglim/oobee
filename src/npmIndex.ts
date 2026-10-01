@@ -6,6 +6,8 @@ import { JSDOM } from 'jsdom';
 import { fileURLToPath } from 'url';
 import { EnqueueStrategy } from 'crawlee';
 import constants, { BrowserTypes, RuleFlags, ScannerTypes, a11yRuleShortDescriptionMap, a11yRuleLongDescriptionMap, a11yRuleStepByStepGuide } from './constants/constants.js';
+import { getAxeConfiguration } from './crawlers/custom/getAxeConfiguration.js';
+import { getAxeLocale, getLanguage, getOobeeAxeTexts, getRuleTexts, setLanguage } from './i18n/index.js';
 import {
   deleteClonedProfiles,
   getBrowserToRun,
@@ -51,6 +53,8 @@ declare global {
     }>;
     axe: any;
     getAxeConfiguration: any;
+    oobeeAxeLocale: any;
+    oobeeTexts: any;
     flagUnlabelledClickableElements: any;
     disableOobee: boolean;
     enableWcagAaa: boolean;
@@ -74,6 +78,7 @@ const getOobeeFunctionsScript = (
   disableOobee: boolean,
   enableWcagAaa: boolean,
   parentHtmlDepth: number = 0,
+  lang: string = getLanguage(),
 ) => {
   const safeParentHtmlDepth = Number.isFinite(parentHtmlDepth) && parentHtmlDepth > 0
     ? Math.floor(parentHtmlDepth)
@@ -102,129 +107,11 @@ const getOobeeFunctionsScript = (
       window.xPathToCss = ${xPathToCss.toString()};
       window.extractText = ${extractText.toString()};
       
-      function getReadabilityInterpretation(score) {
-        const num = parseFloat(score);
-        if (Number.isNaN(num)) return '';
-        if (num > 30) return 'It is targeted for junior college (JC) level comprehension and above.';
-        return 'It is targeted for university graduate level comprehension and above.';
-      }
-
-      function getAxeConfiguration({
-        enableWcagAaa = false,
-        gradingReadabilityFlag = '',
-        disableOobee = false,
-      }) {
-        return {
-          branding: {
-            application: 'oobee',
-          },
-          checks: [
-            {
-              id: 'oobee-confusing-alt-text',
-              metadata: {
-                impact: 'serious',
-                messages: {
-                  pass: 'The image alt text is probably useful.',
-                  fail: "The image alt text set as 'img', 'image', 'picture', 'photo', or 'graphic' is confusing or not useful.",
-                },
-              },
-              evaluate: window.evaluateAltText,
-            },
-            {
-              id: 'oobee-accessible-label',
-              metadata: {
-                impact: 'serious',
-                messages: {
-                  pass: 'The clickable element has an accessible label.',
-                  fail: 'The clickable element does not have an accessible label.',
-                },
-              },
-              evaluate: (node) => {
-                return !node.dataset.flagged; // fail any element with a data-flagged attribute set to true
-              },
-            },
-            ...((enableWcagAaa && !disableOobee && gradingReadabilityFlag !== '')
-              ? [
-                  {
-                    id: 'oobee-grading-text-contents',
-                    metadata: {
-                      impact: 'moderate',
-                      messages: {
-                        pass: 'The text content is easy to understand.',
-                        fail: \`Text content is potentially difficult to read.\n  It scored \${gradingReadabilityFlag} out of 50 on the Flesch-Kincaid Readability Test.\n  \${getReadabilityInterpretation(gradingReadabilityFlag)}\`,
-                        incomplete: \`Text content is potentially difficult to read.\n  It scored \${gradingReadabilityFlag} out of 50 on the Flesch-Kincaid Readability Test.\n  \${getReadabilityInterpretation(gradingReadabilityFlag)}\`,
-                      },
-                    },
-                    evaluate: (_node) => false,
-                  },
-                ]
-              : []),
-          ],
-          rules: [
-            { id: 'target-size', enabled: true },
-            {
-              id: 'oobee-confusing-alt-text',
-              selector: 'img[alt]',
-              enabled: true,
-              any: ['oobee-confusing-alt-text'],
-              tags: ['wcag2a', 'wcag111'],
-              metadata: {
-                description: 'Ensures image alt text is clear and useful.',
-                help: 'Image alt text must not be vague or unhelpful.',
-                helpUrl: 'https://www.deque.com/blog/great-alt-text-introduction/',
-              },
-            },
-            {
-              id: 'oobee-accessible-label',
-              // selector: '*', // to be set with the checker function output xpaths converted to css selectors
-              enabled: true,
-              any: ['oobee-accessible-label'],
-              tags: ['wcag2a', 'wcag211', 'wcag412'],
-              metadata: {
-                description: 'Ensures clickable elements have an accessible label.',
-                help: 'Clickable elements must have accessible labels.',
-                helpUrl: 'https://www.deque.com/blog/accessible-aria-buttons',
-              },
-            },
-            ...((enableWcagAaa && !disableOobee && gradingReadabilityFlag !== '')
-              ? [
-                  {
-                    id: 'oobee-grading-text-contents',
-                    selector: 'html',
-                    enabled: true,
-                    any: ['oobee-grading-text-contents'],
-                    tags: ['wcag2aaa', 'wcag315'],
-                    metadata: {
-                      description:
-                        'Text content should be easy to understand for individuals with education levels up to university graduates. If the text content is difficult to understand, provide supplemental content or a version that is easy to understand.',
-                      help: 'Text content should be clear and plain to ensure that it is easily understood.',
-                      helpUrl: 'https://www.wcag.com/uncategorized/3-1-5-reading-level/',
-                    },
-                  },
-                ]
-              : []),
-          ]
-            .filter(rule => (disableOobee ? !rule.id.startsWith('oobee') : true))
-            .concat(
-              enableWcagAaa
-                ? [
-                    {
-                      id: 'color-contrast-enhanced',
-                      enabled: true,
-                    },
-                    {
-                      id: 'identical-links-same-purpose',
-                      enabled: true,
-                    },
-                    {
-                      id: 'meta-refresh-no-exceptions',
-                      enabled: true,
-                    },
-                  ]
-                : [],
-            ),
-        };
-      }
+      // Shared with the crawler (src/crawlers/custom/getAxeConfiguration.ts) so
+      // Oobee custom rules and their translations stay in one place.
+      ${getAxeConfiguration.toString()}
+      window.oobeeAxeLocale = ${JSON.stringify(getAxeLocale(lang) ?? null)};
+      window.oobeeTexts = ${JSON.stringify(getOobeeAxeTexts(lang))};
       window.getAxeConfiguration = getAxeConfiguration;
 
       async function runA11yScan(elementsToScan = [], gradingReadabilityFlag = '') {
@@ -269,7 +156,7 @@ const getOobeeFunctionsScript = (
           })
           .filter(item => item !== '');
   
-        (window).axe.configure((window).getAxeConfiguration({ disableOobee: (window).disableOobee, enableWcagAaa: (window).enableWcagAaa, gradingReadabilityFlag }));
+        (window).axe.configure((window).getAxeConfiguration({ disableOobee: (window).disableOobee, enableWcagAaa: (window).enableWcagAaa, gradingReadabilityFlag, locale: (window).oobeeAxeLocale || undefined, oobeeTexts: (window).oobeeTexts }));
         const axeScanResults = await (window).axe.run(elementsToScan, {
           resultTypes: ['violations', 'passes', 'incomplete'],
         });
@@ -327,8 +214,8 @@ const getOobeeFunctionsScript = (
             id: 'oobee-accessible-label',
             impact: 'serious',
             tags: ['wcag2a', 'wcag211', 'wcag412'],
-            description: 'Ensures clickable elements have an accessible label.',
-            help: 'Clickable elements (i.e. elements with mouse-click interaction) must have accessible labels.',
+            description: (window).oobeeTexts.runtime.accessibleLabelDescription,
+            help: (window).oobeeTexts.runtime.accessibleLabelHelpViolation,
             helpUrl: 'https://www.deque.com/blog/accessible-aria-buttons',
             nodes: escapedCssSelectors
               .map(cssSelector => {
@@ -336,15 +223,14 @@ const getOobeeFunctionsScript = (
                   html: (window).findElementByCssSelector(cssSelector),
                   target: [cssSelector],
                   impact: 'serious',
-                  failureSummary:
-                    'Fix any of the following:\\n  The clickable element does not have an accessible label.',
+                  failureSummary: (window).oobeeTexts.runtime.accessibleLabelFailure,
                   any: [
                     {
                       id: 'oobee-accessible-label',
                       data: null,
                       relatedNodes: [],
                       impact: 'serious',
-                      message: 'The clickable element does not have an accessible label.',
+                      message: (window).oobeeTexts.runtime.accessibleLabelMessage,
                     },
                   ],
                   all: [],
@@ -393,6 +279,7 @@ export const init = async ({
   htmlMaxBytes,
   parentHtmlDepth,
   parentHtmlMaxBytes,
+  lang,
 }: {
   entryUrl: string;
   testLabel: string;
@@ -414,8 +301,11 @@ export const init = async ({
   htmlMaxBytes?: number;
   parentHtmlDepth?: number;
   parentHtmlMaxBytes?: number;
+  // ISO 639-1 code for report + issue text (e.g. 'ja'); defaults to OOBEE_LANG or 'en'
+  lang?: string;
 }) => {
   consoleLogger.info('Starting Oobee');
+  if (lang) setLanguage(lang);
 
   const [date, time] = new Date().toLocaleString('sv').replaceAll(/-|:/g, '').split(' ');
   // hostname is derived from user-supplied entryUrl and used to build
@@ -728,14 +618,15 @@ const processAndSubmitResults = async (
             mergedResults[category].rules[ruleId] = JSON.parse(JSON.stringify(ruleVal));
 
             // Map the description to the short description if available
-            if (constants.a11yRuleShortDescriptionMap[ruleId]) {
-              mergedResults[category].rules[ruleId].description = constants.a11yRuleShortDescriptionMap[ruleId];
+            const ruleTexts = getRuleTexts();
+            if (ruleTexts.shortDescriptionMap[ruleId]) {
+              mergedResults[category].rules[ruleId].description = ruleTexts.shortDescriptionMap[ruleId];
             }
 
             // Add short description, long description and step-by-step guide
-            mergedResults[category].rules[ruleId].shortDescription = a11yRuleShortDescriptionMap[ruleId];
-            mergedResults[category].rules[ruleId].longDescription = a11yRuleLongDescriptionMap[ruleId];
-            mergedResults[category].rules[ruleId].stepByStepGuide = a11yRuleStepByStepGuide[ruleId];
+            mergedResults[category].rules[ruleId].shortDescription = ruleTexts.shortDescriptionMap[ruleId];
+            mergedResults[category].rules[ruleId].longDescription = ruleTexts.longDescriptionMap[ruleId];
+            mergedResults[category].rules[ruleId].stepByStepGuide = ruleTexts.stepByStepGuide[ruleId];
             
             // Add url to items
             mergedResults[category].rules[ruleId].items.forEach((item: any) => {
@@ -828,14 +719,15 @@ const processAndSubmitResults = async (
         Object.values(resultCategory.rules).forEach((rule: any) => {
 
           // Map the description to the short description if available
-          if (constants.a11yRuleShortDescriptionMap[rule.rule]) {
-            rule.description = constants.a11yRuleShortDescriptionMap[rule.rule];
+          const ruleTexts = getRuleTexts();
+          if (ruleTexts.shortDescriptionMap[rule.rule]) {
+            rule.description = ruleTexts.shortDescriptionMap[rule.rule];
           }
 
           // Add short description, long description and step-by-step guide
-          rule.shortDescription = a11yRuleShortDescriptionMap[rule.rule];
-          rule.longDescription = a11yRuleLongDescriptionMap[rule.rule];
-          rule.stepByStepGuide = a11yRuleStepByStepGuide[rule.rule];
+          rule.shortDescription = ruleTexts.shortDescriptionMap[rule.rule];
+          rule.longDescription = ruleTexts.longDescriptionMap[rule.rule];
+          rule.stepByStepGuide = ruleTexts.stepByStepGuide[rule.rule];
 
           if (rule.items) {
            rule.items.forEach((item: any) => {
@@ -868,6 +760,7 @@ export const scanHTML = async (
     metadata?: string;
     ruleset?: RuleFlags[];
     scanSource?: string;
+    lang?: string;
   },
 ) => {
   const {
@@ -878,7 +771,14 @@ export const scanHTML = async (
     metadata = '',
     ruleset = [RuleFlags.DEFAULT],
     scanSource,
+    lang,
   } = config;
+  if (lang) setLanguage(lang);
+
+  // Node-side axe is a shared singleton: apply the locale (if any) for this run
+  // and reset afterwards so other callers keep axe's English defaults.
+  const scanHtmlAxeLocale = getAxeLocale();
+  if (scanHtmlAxeLocale) axe.configure({ locale: scanHtmlAxeLocale } as any);
 
   const enableWcagAaa = ruleset.includes(RuleFlags.ENABLE_WCAG_AAA);
   const tags = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -955,6 +855,10 @@ export const scanHTML = async (
     });
   }
 
+  // axe.reset() needs a browser `window` (throws under Node), so restore only
+  // the locale: axe snapshots its English defaults before the first applyLocale.
+  if (scanHtmlAxeLocale) (axe as any)._audit?._resetLocale?.();
+
   return processAndSubmitResults(scanData, name, email, metadata, scanSource);
 };
 
@@ -967,6 +871,7 @@ export const scanPage = async (
     metadata?: string;
     ruleset?: RuleFlags[];
     scanSource?: string;
+    lang?: string;
   },
 ) => {
   const {
@@ -976,7 +881,9 @@ export const scanPage = async (
     metadata = '',
     ruleset = [RuleFlags.DEFAULT],
     scanSource,
+    lang,
   } = config;
+  if (lang) setLanguage(lang);
 
   const disableOobee = ruleset.includes(RuleFlags.DISABLE_OOBEE);
   const enableWcagAaa = ruleset.includes(RuleFlags.ENABLE_WCAG_AAA);

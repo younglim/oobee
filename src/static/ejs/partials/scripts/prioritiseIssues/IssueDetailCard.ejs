@@ -8,7 +8,7 @@
 
       const titleElement = document.getElementById('issueDetailTitle');
       if (titleElement) {
-        titleElement.textContent = issue.description || 'Issue';
+        titleElement.textContent = issue.description || t('prioritise.issueFallback');
       }
 
       const imageElement = document.getElementById('issueDetailImage');
@@ -39,7 +39,7 @@
         } else {
           imageContainer.style.display = 'flex';
           imageElement.src = imageSrc;
-          imageElement.alt = issue.description || 'Issue illustration';
+          imageElement.alt = issue.description || t('ruleModal.issueIllustration');
         }
       }
 
@@ -68,7 +68,7 @@
         );
 
         if (level) {
-          badges.push(`<span class="issue-detail-conformance-badge">Level ${level}</span>`);
+          badges.push(`<span class="issue-detail-conformance-badge">${t('ruleModal.level', { level })}</span>`);
         }
 
         conformanceContainer.innerHTML = badges.join('');
@@ -89,18 +89,11 @@
       const disabilities = disabilityBadgesMap[issue.ruleId] || [];
 
       if (disabilityMessage && disabilities.length > 0) {
-        let disabilityText = '';
-        if (disabilities.length === 1) {
-          disabilityText = `${disabilities[0]} Disability `;
-        } else if (disabilities.length === 2) {
-          disabilityText = `${disabilities[0]} and ${disabilities[1]} Disability`;
-        } else {
-          const boldedDisabilities = disabilities.map(d => `${d}`);
-          const lastDisability = boldedDisabilities.pop();
-          disabilityText = `${boldedDisabilities.join(', ')} and ${lastDisability} Disability`;
-        }
+        const disabilityText = formatDisabilityList(disabilities);
 
-        disabilityMessage.innerHTML = `This issue prevents users with <span class="disability-text">${disabilityText}</span> from navigating your website.`;
+        disabilityMessage.innerHTML = t('disability.impact', {
+          disability: `<span class="disability-text">${htmlEscapeString(disabilityText)}</span>`,
+        });
         disabilitySection.style.display = 'block';
       } else {
         disabilitySection.style.display = 'none';

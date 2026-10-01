@@ -98,7 +98,7 @@
     }
 
     button.disabled = true;
-    button.textContent = 'Generating Fix...';
+    button.textContent = t('itemCard.genAiGeneratingFix');
 
     // Clear previous errors
     const errorContainer = document.getElementById(errorDiv);
@@ -250,7 +250,7 @@
       // Reset button to regenerate state
       button.disabled = false;
       button.style = 'border: 1px solid var(--oobee-blue-100); color: var(--oobee-blue-100);';
-      button.textContent = 'Regenerate Fix';
+      button.textContent = t('itemCard.genAiRegenerateFix');
 
     } catch (error) {
       console.error('Error in Gen AI fix generation:', error);
@@ -258,13 +258,13 @@
       // Reset button to initial state
       button.disabled = false;
       button.style = 'border: 1px solid var(--oobee-blue-100); color: var(--oobee-blue-100);';
-      button.textContent = 'Gen AI Suggest Fix';
+      button.textContent = t('itemCard.genAiSuggestFix');
 
       if (errorContainer) {
         const isConnectionError = error.message.includes('fetch') || error.message.includes('Failed to fetch');
         const errorMessage = isConnectionError
-          ? 'Unable to connect to AI service. Please ensure the wcag-eval API is running on port 5000.'
-          : `Failed to generate fix suggestion: ${error.message}`;
+          ? t('ai.cannotConnect')
+          : t('ai.failedToGenerate', { message: error.message });
 
         errorContainer.innerHTML = `<div class="generateAiError">${errorMessage}</div>`;
       }
@@ -367,7 +367,7 @@
     // Support both snake_case (Python) and camelCase (TypeScript) responses
     const contrastAnalysis = fixSuggestion.contrast_analysis || fixSuggestion.contrastAnalysis || {};
     const targetSizeAnalysis = fixSuggestion.target_size_analysis || fixSuggestion.targetSizeAnalysis || {};
-    const plainExplanation = fixSuggestion.why_it_matters || fixSuggestion.explanation || 'This fix improves accessibility for users with visual impairments.';
+    const plainExplanation = fixSuggestion.why_it_matters || fixSuggestion.explanation || t('ai.defaultExplanation');
     const diagnosis = fixSuggestion.diagnosis || fixSuggestion.explanation || plainExplanation;
 
     // Escape HTML for safe rendering
@@ -397,7 +397,7 @@
       if (fixSuggestion.css) {
         mainFix.push(`
           <div style="margin-bottom: 16px;">
-            <p style="font-size: 13px; margin-bottom: 8px; color: #666; font-weight: 500;">Recommended CSS Fix:</p>
+            <p style="font-size: 13px; margin-bottom: 8px; color: #666; font-weight: 500;">${t('ai.recommendedCssFix')}</p>
             <code class="codeForAiResponse language-css hljs" style="display: block; padding: 16px; background: #f8f9fa; border-radius: 6px; font-size: 13px; border: 1px solid #e0e0e0; white-space: pre-wrap; word-break: break-all;">${escapeHtml(fixSuggestion.css)}</code>
           </div>
         `);
@@ -405,7 +405,7 @@
       if (fixSuggestion.html) {
         mainFix.push(`
           <div style="margin-bottom: 16px;">
-            <p style="font-size: 13px; margin-bottom: 8px; color: #666; font-weight: 500;">Recommended HTML Fix:</p>
+            <p style="font-size: 13px; margin-bottom: 8px; color: #666; font-weight: 500;">${t('ai.recommendedHtmlFix')}</p>
             <code class="codeForAiResponse language-html hljs" style="display: block; padding: 16px; background: #f8f9fa; border-radius: 6px; font-size: 13px; border: 1px solid #e0e0e0; white-space: pre-wrap; word-break: break-all;">${escapeHtml(fixSuggestion.html)}</code>
           </div>
         `);
@@ -417,7 +417,7 @@
           const altCode = alt.css || alt.html || '';
           return `
             <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;">
-              <p style="font-size: 13px; margin-bottom: 8px; color: #666; font-weight: 500;">Alternative ${index + 1}: ${escapeHtml(alt.explanation || '')}</p>
+              <p style="font-size: 13px; margin-bottom: 8px; color: #666; font-weight: 500;">${escapeHtml(t('ai.alternative', { index: index + 1, explanation: alt.explanation || '' }))}</p>
               <code class="codeForAiResponse language-${alt.css ? 'css' : 'html'} hljs" style="display: block; padding: 16px; background: #f8f9fa; border-radius: 6px; font-size: 13px; border: 1px solid #e0e0e0; white-space: pre-wrap; word-break: break-all;">${escapeHtml(altCode)}</code>
             </div>
           `;
@@ -427,7 +427,7 @@
 
       codeFixesHtml = `
         <div style="margin-bottom: 16px;">
-          <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">Code Fix:</h4>
+          <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">${t('ai.codeFix')}</h4>
           ${mainFix.join('')}
         </div>
       `;
@@ -436,7 +436,7 @@
     else if (fixSuggestion.code_fixes && Array.isArray(fixSuggestion.code_fixes) && fixSuggestion.code_fixes.length > 0) {
       const codeFixes = fixSuggestion.code_fixes.map((fix, index) => {
         const language = fix.language || 'html';
-        const description = fix.description || `Option ${index + 1}`;
+        const description = fix.description || t('ai.option', { index: index + 1 });
         const code = fix.after || fix.before || '';
         const marginBottom = index === fixSuggestion.code_fixes.length - 1 ? '0' : '20px';
 
@@ -449,7 +449,7 @@
 
       codeFixesHtml = `
       <div style="margin-bottom: 16px;">
-        <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">Code Fix${fixSuggestion.code_fixes.length > 1 ? 'es' : ''}:</h4>
+        <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">${fixSuggestion.code_fixes.length > 1 ? t('ai.codeFixes') : t('ai.codeFix')}</h4>
         ${codeFixes}
       </div>
     `;
@@ -458,7 +458,7 @@
     return `
       <div class="genai-response-card">
         <div style="margin-bottom: 24px;">
-          <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">What's the problem?</h4>
+          <h4 style="font-size: 16px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">${t('ai.whatsTheProblem')}</h4>
           <p style="font-size: 14px; line-height: 1.6; margin-bottom: 16px; color: #333;">
             ${escapeHtml(diagnosis)}
           </p>
@@ -466,11 +466,13 @@
           ${Number.isFinite(Number(contrastAnalysis.current_ratio)) ? `
           <div style="background: #FAF8FD; padding: 12px; border-radius: 6px; margin-bottom: 16px;">
             <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #333;">
-              The current text has a contrast ratio of <strong>${safeNumber(contrastAnalysis.current_ratio)}:1</strong>,
-              but it needs at least <strong>${safeNumber(contrastAnalysis.required_ratio)}:1</strong> to meet accessibility standards.
+              ${t('ai.contrastCurrent', {
+                current: `<strong>${safeNumber(contrastAnalysis.current_ratio)}:1</strong>`,
+                required: `<strong>${safeNumber(contrastAnalysis.required_ratio)}:1</strong>`,
+              })}
               ${contrastAnalysis.passes_aa
-                ? `The suggested fix achieves <strong>${safeNumber(contrastAnalysis.proposed_ratio)}:1</strong>, which passes WCAG AA requirements.`
-                : `The suggested fix improves it to <strong>${safeNumber(contrastAnalysis.proposed_ratio)}:1</strong>.`}
+                ? t('ai.contrastPasses', { proposed: `<strong>${safeNumber(contrastAnalysis.proposed_ratio)}:1</strong>` })
+                : t('ai.contrastImproves', { proposed: `<strong>${safeNumber(contrastAnalysis.proposed_ratio)}:1</strong>` })}
             </p>
           </div>
           ` : ''}
@@ -479,13 +481,13 @@
           <div style="background: #F5FAFF; padding: 12px; border-radius: 6px; margin-bottom: 16px; border: 1px solid #e0efff;">
             <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #333;">
               ${targetSizeAnalysis.meets_minimum === false
-                ? 'Estimated hit area is below the WCAG 2.5.8 minimum of 24x24 CSS pixels.'
-                : 'Target size analysis for this control:'}
+                ? t('ai.targetBelowMinimum')
+                : t('ai.targetAnalysis')}
               ${Number.isFinite(Number(targetSizeAnalysis.estimated_width))
-                ? ` Estimated width: <strong>${safeNumber(targetSizeAnalysis.estimated_width)}px</strong>.`
+                ? ` ${t('ai.estimatedWidth', { value: `<strong>${safeNumber(targetSizeAnalysis.estimated_width)}px</strong>` })}`
                 : ''}
               ${Number.isFinite(Number(targetSizeAnalysis.estimated_height))
-                ? ` Estimated height: <strong>${safeNumber(targetSizeAnalysis.estimated_height)}px</strong>.`
+                ? ` ${t('ai.estimatedHeight', { value: `<strong>${safeNumber(targetSizeAnalysis.estimated_height)}px</strong>` })}`
                 : ''}
               ${targetSizeAnalysis.notes ? ` ${escapeHtml(targetSizeAnalysis.notes)}` : ''}
             </p>
@@ -494,7 +496,7 @@
 
           ${fixSuggestion.fix_steps && fixSuggestion.fix_steps.length > 0 ? `
           <div style="margin-top: 16px;">
-            <h5 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">How to fix it:</h5>
+            <h5 style="font-size: 14px; font-weight: 600; margin-bottom: 12px; color: #1a1a1a;">${t('ai.howToFixIt')}</h5>
             <ol style="margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.8; color: #333;">
               ${fixSuggestion.fix_steps.map(step => `<li style="word-wrap: break-word; overflow-wrap: break-word;">${escapeHtml(step)}</li>`).join('')}
             </ol>

@@ -1,7 +1,7 @@
 <script>
   const formatAboutStartTime = dateString => {
     const utcStartTimeDate = new Date(dateString);
-    const formattedStartTime = utcStartTimeDate.toLocaleTimeString('en-GB', {
+    const formattedStartTime = utcStartTimeDate.toLocaleTimeString(t('common.dateLocale'), {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -11,7 +11,7 @@
       timeZoneName: 'shortGeneric',
     });
 
-    const timezoneAbbreviation = new Intl.DateTimeFormat('en', {
+    const timezoneAbbreviation = new Intl.DateTimeFormat(t('common.offsetLocale'), {
       timeZoneName: 'shortOffset',
     })
       .formatToParts(utcStartTimeDate)
@@ -64,11 +64,11 @@
   document.getElementById('aboutStartTime').innerHTML = formattedViewerLocalStartTime;
 
   document.getElementById('viewport-text').textContent = scanData.viewport.startsWith('CustomWidth')
-    ? `${scanData.viewport.split('_')[1]} Custom Width View`
-    : scanData.viewport + ' View';
+    ? t('header.customWidthView', { width: scanData.viewport.split('_')[1] })
+    : t('header.viewportView', { viewport: scanData.viewport });
 
   const phAppVersionElement = document.getElementById('oobeeAppVersion');
-  const versionContent = 'Oobee Version ' + scanData.oobeeAppVersion;
+  const versionContent = t('aboutScan.version', { version: scanData.oobeeAppVersion });
   phAppVersionElement.textContent = versionContent;
 
   const cypressScanAboutMetadata = scanData.cypressScanAboutMetadata;

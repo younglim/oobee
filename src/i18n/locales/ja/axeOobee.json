@@ -1,0 +1,64 @@
+{
+  "rules": {
+    "oobee-confusing-alt-text": {
+      "description": "画像の代替テキストが明確で有用であることを確認してください",
+      "help": "画像の代替テキストは、あいまいだったり役に立たない内容であってはなりません"
+    },
+    "oobee-accessible-label": {
+      "description": "クリック可能な要素にアクセシブルなラベルがあることを確認してください",
+      "help": "クリック可能な要素（マウスクリックによる操作が可能な要素）には、アクセシブルなラベルがなければなりません"
+    },
+    "oobee-grading-text-contents": {
+      "description": "テキストコンテンツは、大学卒業レベルまでの教育水準の人にも理解しやすい内容にしてください。テキストコンテンツが理解しにくい場合は、補足コンテンツや、理解しやすい別バージョンを提供してください。",
+      "help": "テキストコンテンツは、容易に理解できるよう、明確で平易な表現にしなければなりません"
+    }
+  },
+  "checks": {
+    "oobee-confusing-alt-text": {
+      "pass": "画像の代替テキストはおそらく有用です。",
+      "fail": "画像の代替テキストが「img」「image」「picture」「photo」「graphic」などに設定されており、わかりにくく役に立ちません。"
+    },
+    "oobee-accessible-label": {
+      "pass": "クリック可能な要素にアクセシブルなラベルがあります。",
+      "fail": "クリック可能な要素にアクセシブルなラベルがありません。"
+    },
+    "oobee-grading-text-contents": {
+      "pass": "テキストコンテンツは理解しやすい内容です。"
+    }
+  },
+  "runtime": {
+    "readabilityGradingFail": "テキストコンテンツは読みにくい可能性があります。\n  Flesch-Kincaid 読みやすさテストで 50 点満点中 {{score}} 点でした。\n  {{interpretation}}",
+    "readabilityJC": "短大・大学進学レベル以上の読解力を対象とした内容です。",
+    "readabilityUniversity": "大学卒業レベル以上の読解力を対象とした内容です。",
+    "accessibleLabelHelpViolation": "クリック可能な要素（マウスクリックによる操作が可能な要素）には、アクセシブルなラベルがなければなりません。",
+    "accessibleLabelDescription": "クリック可能な要素にアクセシブルなラベルがあることを確認してください。",
+    "accessibleLabelFailure": "次のいずれかを修正します:\n  クリック可能な要素にアクセシブルなラベルがありません。",
+    "accessibleLabelMessage": "クリック可能な要素にアクセシブルなラベルがありません。",
+    "targetSize": "ターゲットのサイズが不十分です: {{width}}px x {{height}}px{{boxSizing}}。\n  少なくとも 24px x 24px にしてください。",
+    "targetSizeBoxSizing": "（box-sizing: {{value}}）",
+    "targetSizeSpacing": "\n  ターゲットと隣接する要素との間の空白が {{spacing}}px しかなく不十分です。クリック可能な余白を少なくとも 24px 確保してください。",
+    "targetSizeInlineStyle": "\n  現在のボタンのスタイルコードでは、クリック可能な領域は広がりません。\n  明示的な width/height を削除し、代わりに min-width: 24px; min-height: 24px を使用してください。\n  または、視覚的なコンテンツを子要素の <span> に配置してください。",
+    "validLang": "lang 属性の値が有効な言語ではありません。\n  \"{{langValue}}\" ではなく、登録済みの IANA 言語コードを使用してください。",
+    "validLangPrivateUse": "\n  axe-core の valid-lang ルールは、プライベートユース・サブタグも拒否します。",
+    "validLangHint": "\n  このテキストの実際の言語を特定し、登録済みの BCP 47 コードを使用してください（例: lang=\"it\" イタリア語、\"es\" スペイン語、\"fr\" フランス語、\"de\" ドイツ語、\"zh\" 中国語、\"ja\" 日本語、\"ko\" 韓国語、\"pt\" ポルトガル語、\"ar\" アラビア語）。",
+    "contrastRecFg": "前景のテキスト色を {{hex}}（{{rgb}}）に",
+    "contrastRecBg": "背景色を {{hex}}（{{rgb}}）に",
+    "contrastOr": "、または",
+    "contrastAnd": "、および",
+    "contrastListSep": "、",
+    "contrastBold": "太字",
+    "contrastRegular": "標準",
+    "contrastExample": "{{bg}} 上の前景色 {{fg}}（{{fontSize}}、{{weight}}のテキスト）",
+    "contrastBase": "このコンポーネント内の複数のテキスト要素が、WCAG 1.4.3 コントラスト（最低限）を満たしていません。\n  通常のテキストは、実際の背景に対して {{targetRatio}} 以上のコントラスト比が必要です。\n  現在のテキストのコントラスト比 {{currentRatio}} は要件を満たしていません。このスニペットで不合格となった組み合わせ: {{examples}}。",
+    "contrastRecommendation": "\n  推奨: {{list}}調整してください。",
+    "contrastNoteGradient": "グラデーション背景が検出されました（{{value}}）: サンプリングした背景色は 1 点のみを表しています。テキストが表示されるすべてのグラデーションの分岐点と位置でコントラストを確認し、グラデーションの分岐点を調整するか、テキストの背後に単色のフォールバックを追加してください",
+    "contrastNoteAncestorGradient": "祖先要素がグラデーション背景を持っています: サンプリングした背景色は、テキストの背後に実際に表示されている色と一致しない可能性があります。実際に描画されたグラデーションに対してコントラストを確認してください",
+    "contrastNoteBgImage": "背景画像が検出されました: サンプリングした色だけではコントラストを完全には判定できません。すべての画像コンテンツと状態でテキストが読みやすいことを確認してください",
+    "contrastNoteAncestorBgImage": "祖先要素が背景画像を持っています: このテキストの実際の背景は、サンプリングした値と異なる可能性があります",
+    "contrastNoteOpacity": "この要素または祖先要素で 1 未満の opacity が検出されました: 描画されたコントラストは、算出された色の値よりも低くなります",
+    "contrastNoteBlend": "mix-blend-mode: {{value}} が適用されています: 実際に描画される色は下にあるレイヤーによって変わります",
+    "contrastNoteBackdrop": "backdrop-filter: {{value}} が適用されています: 実際の背景の見え方が変化します",
+    "contrastNoteFilter": "CSS filter: {{value}} がこの要素に適用されています: 描画される色が算出値と異なる可能性があります",
+    "contrastRenderingComplexity": "\n  描画の複雑さ: {{list}}。\n  上記の色の修正案は、この要素に対して正確でない可能性があります。実際に描画されたコントラストを手動で確認することを強く推奨します。"
+  }
+}

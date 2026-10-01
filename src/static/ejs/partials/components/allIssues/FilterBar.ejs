@@ -1,23 +1,23 @@
 <div class="filter-bar">
   <div class="filter-dropdowns">
-    <select id="severityFilter" class="filter-dropdown" aria-label="Filter by severity">
-      <option value="all">All Severity Groups</option>
-      <option value="mustFix">Must Fix</option>
-      <option value="goodToFix">Good to Fix</option>
-      <option value="needsReview">Manual Review</option>
+    <select id="severityFilter" class="filter-dropdown" aria-label="<%= t('allIssues.filterBySeverity') %>">
+      <option value="all"><%= t('allIssues.allSeverityGroups') %></option>
+      <option value="mustFix"><%= t('common.category.mustFix') %></option>
+      <option value="goodToFix"><%= t('common.category.goodToFix') %></option>
+      <option value="needsReview"><%= t('allIssues.manualReview') %></option>
     </select>
 
-    <select id="criteriaFilter" class="filter-dropdown" aria-label="Filter by WCAG criteria">
-      <option value="all">All Failed Criteria</option>
+    <select id="criteriaFilter" class="filter-dropdown" aria-label="<%= t('allIssues.filterByCriteria') %>">
+      <option value="all"><%= t('allIssues.allFailedCriteria') %></option>
       <!-- Dynamically populated -->
     </select>
 
-    <select id="disabilityFilter" class="filter-dropdown" aria-label="Filter by disability type">
-      <option value="all">All Disabilities</option>
-      <option value="Visual">Visual Disability</option>
-      <option value="Hearing">Hearing Disability</option>
-      <option value="Motor">Motor Disability</option>
-      <option value="Learning">Learning Disability</option>
+    <select id="disabilityFilter" class="filter-dropdown" aria-label="<%= t('allIssues.filterByDisability') %>">
+      <option value="all"><%= t('allIssues.allDisabilities') %></option>
+      <option value="Visual"><%= t('disability.one', { a: t('disability.names.Visual') }) %></option>
+      <option value="Hearing"><%= t('disability.one', { a: t('disability.names.Hearing') }) %></option>
+      <option value="Motor"><%= t('disability.one', { a: t('disability.names.Motor') }) %></option>
+      <option value="Learning"><%= t('disability.one', { a: t('disability.names.Learning') }) %></option>
     </select>
   </div>
 
@@ -26,8 +26,8 @@
       type="text" 
       id="issuesSearchInput" 
       class="search-input" 
-      placeholder="Search" 
-      aria-label="Search issues"
+      placeholder="<%= t('allIssues.search') %>"
+      aria-label="<%= t('allIssues.searchIssues') %>"
     />
   </div>
 </div>

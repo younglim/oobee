@@ -16,13 +16,11 @@ import {
   convertItemsToReferences,
 } from './mergeAxeResults.js';
 
+import { getWcagClauses, getItemTypeDescription, getLanguage, getRuleTexts, setLanguage } from './i18n/index.js';
 import constants, {
   ScannerTypes,
   WCAGclauses,
-  a11yRuleShortDescriptionMap,
   disabilityBadgesMap,
-  a11yRuleLongDescriptionMap,
-  a11yRuleStepByStepGuide,
 } from './constants/constants.js';
 
 import { consoleLogger } from './logs.js';
@@ -88,7 +86,7 @@ const ensureCategory = (
   };
 
   return {
-    description: categoryObj?.description || itemTypeDescription[categoryName],
+    description: categoryObj?.description || getItemTypeDescription()[categoryName],
     ...totals,
     rules,
   };
@@ -97,6 +95,7 @@ const ensureCategory = (
 export const generateHtmlReport = async (
   resultDir: string,
   htmlFilename = 'report',
+  langOverride?: string,
 ): Promise<string> => {
   try {
     const storagePath = path.resolve(resultDir);
@@ -125,6 +124,9 @@ export const generateHtmlReport = async (
     }
 
     const scanData = JSON.parse(await fs.readFile(scanDataJsonPath, 'utf8'));
+    // Regenerate in the scan's original language unless one was explicitly requested.
+    const lang = setLanguage(langOverride || scanData.lang || getLanguage());
+    const ruleTexts = getRuleTexts(lang);
     const scanItemsAll = JSON.parse(await fs.readFile(scanItemsJsonPath, 'utf8'));
 
     // Disk space: passed may be absent from scanItems.json (excluded to reduce disk usage).
@@ -132,7 +134,7 @@ export const generateHtmlReport = async (
     // To revert (when passed is restored in scanItems.json), remove this block.
     if (!scanItemsAll.passed) {
       scanItemsAll.passed = {
-        description: itemTypeDescription.passed,
+        description: getItemTypeDescription().passed,
         totalItems: 0,
         totalRuleIssues: 0,
         rules: [],
@@ -203,11 +205,12 @@ export const generateHtmlReport = async (
       items,
       cypressScanAboutMetadata: scanData.cypressScanAboutMetadata || {},
       wcagLinks: scanData.wcagLinks || constants.wcagLinks,
-      wcagClauses: WCAGclauses,
-      a11yRuleShortDescriptionMap,
+      wcagClauses: getWcagClauses(lang),
+      lang,
+      a11yRuleShortDescriptionMap: ruleTexts.shortDescriptionMap,
       disabilityBadgesMap,
-      a11yRuleLongDescriptionMap,
-      a11yRuleStepByStepGuide,
+      a11yRuleLongDescriptionMap: ruleTexts.longDescriptionMap,
+      a11yRuleStepByStepGuide: ruleTexts.stepByStepGuide,
       wcagCriteriaLabels: constants.wcagCriteriaLabels,
       advancedScanOptionsSummaryItems: {
         showIncludeScreenshots: !!scanData.advancedScanOptionsSummaryItems?.showIncludeScreenshots,

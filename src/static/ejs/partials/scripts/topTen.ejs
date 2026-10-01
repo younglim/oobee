@@ -50,9 +50,10 @@
         issuesSpan.className = 'ms-4 issues-badge';
         const issues = Number(page.totalIssues) || 0;
         const occ = Number(page.totalOccurrences) || 0;
-        const issueWord = issues === 1 ? 'issue' : 'issues';
-        const occWord = occ === 1 ? 'occurrence' : 'occurrences';
-        issuesSpan.textContent = `${issues} ${issueWord} (${occ} occ.)`;
+        issuesSpan.textContent = t('topTen.issuesBadge', {
+          issues: tCount('common.issueCount', issues),
+          occurrences: t('common.occAbbrev', { count: occ }),
+        });
 
         listItem.appendChild(link);
         listItem.appendChild(issuesSpan);

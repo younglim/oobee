@@ -31,7 +31,7 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
       // No step-by-step guide available for this rule
       container.innerHTML = `
         <div class="no-steps-message">
-          <p>Step-by-step guide not yet available for this issue.</p>
+          <p>${t('ruleModal.noStepsAvailable')}</p>
         </div>
       `;
       return;
@@ -50,7 +50,7 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
     const stepsHtml = `
       <div class="rule-modal-step">
         <div class="step-header">
-          <h4 class="step-title">1. Check</h4>
+          <h4 class="step-title">${t('ruleModal.stepCheck')}</h4>
         </div>
         <div class="step-content">
           <p class="step-text">${linkifyA11yPlayground(steps.check)}</p>
@@ -59,7 +59,7 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
 
       <div class="rule-modal-step">
         <div class="step-header">
-          <h4 class="step-title">2. Fix</h4>
+          <h4 class="step-title">${t('ruleModal.stepFix')}</h4>
         </div>
         <div class="step-content">
           <p class="step-text">${linkifyA11yPlayground(steps.fix)}</p>
@@ -68,7 +68,7 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
 
       <div class="rule-modal-step">
         <div class="step-header">
-          <h4 class="step-title">3. Review</h4>
+          <h4 class="step-title">${t('ruleModal.stepReview')}</h4>
         </div>
         <div class="step-content">
           <p class="step-text">${linkifyA11yPlayground(steps.review)}</p>
@@ -77,7 +77,7 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
 
       <div class="rule-modal-step">
         <div class="step-header">
-          <h4 class="step-title">4. Learn</h4>
+          <h4 class="step-title">${t('ruleModal.stepLearn')}</h4>
         </div>
         <div class="step-content">
           <p class="step-text">${linkifyA11yPlayground(steps.learn)}</p>
@@ -134,7 +134,7 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
       } else {
         imageContainer.style.display = 'flex';
         imageElement.src = imageSrc;
-        imageElement.alt = selectedRule.description || 'Issue illustration';
+        imageElement.alt = selectedRule.description || t('ruleModal.issueIllustration');
       }
     }
 
@@ -149,12 +149,12 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
     const categoryBadge = document.getElementById('expandedRuleCategoryBadge');
     if (categoryBadge) {
       const categoryLabels = {
-        mustFix: 'Must Fix',
-        goodToFix: 'Good to Fix',
-        needsReview: 'Manual Test',
-        passed: 'Passed',
+        mustFix: t('common.severity.mustFix'),
+        goodToFix: t('common.severity.goodToFix'),
+        needsReview: t('common.severity.needsReview'),
+        passed: t('common.category.passed'),
       };
-      categoryBadge.textContent = categoryLabels[selectedCategory] || 'Must Fix';
+      categoryBadge.textContent = categoryLabels[selectedCategory] || t('common.severity.mustFix');
 
       // Update badge class
       categoryBadge.className = 'mustfix-badge-label';
@@ -203,7 +203,7 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
       );
 
       if (level) {
-        badges.push(`<span class="conformance-badge">Level ${level}</span>`);
+        badges.push(`<span class="conformance-badge">${t('ruleModal.level', { level })}</span>`);
       }
 
       conformanceContainer.innerHTML = badges.join('');
@@ -222,18 +222,11 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
     const disabilities = disabilityBadgesMap[selectedRule.rule] || [];
 
     if (disabilityMessage && disabilities.length > 0) {
-      let disabilityText = '';
-      if (disabilities.length === 1) {
-        disabilityText = `${disabilities[0]} Disability`;
-      } else if (disabilities.length === 2) {
-        disabilityText = `${disabilities[0]} and ${disabilities[1]} Disability`;
-      } else {
-        const disabilityList = [...disabilities];
-        const lastDisability = disabilityList.pop();
-        disabilityText = `${disabilityList.join(', ')} and ${lastDisability} Disability`;
-      }
+      const disabilityText = formatDisabilityList(disabilities);
 
-      disabilityMessage.innerHTML = `This issue prevents users with <span class="disability-text">${disabilityText}</span> from navigating your website.`;
+      disabilityMessage.innerHTML = t('disability.impact', {
+        disability: `<span class="disability-text">${htmlEscapeString(disabilityText)}</span>`,
+      });
       disabilitySection.style.display = 'block';
     } else {
       disabilitySection.style.display = 'none';
@@ -290,15 +283,15 @@ include('./pageAccordionBuilder') %> <%- include('./constants') %>
 
         // Automatically display content for the selected category
         if (category === selectedCategory) {
-            const occurrencesText = `${ruleInCategory.totalItems} Total occurrences`;
+            const occurrencesText = t('ruleModal.totalOccurrencesAria', { count: ruleInCategory.totalItems });
             const dropdownToggle = document.getElementById('expandedRuleDropdownToggleCategoryInfo');
-            dropdownToggle.innerText = `${ruleInCategory.totalItems} Total occ.`;
+            dropdownToggle.innerText = t('ruleModal.totalOcc', { count: ruleInCategory.totalItems });
             dropdownToggle.setAttribute('aria-label', occurrencesText);
           document.getElementById('expandedRuleDropdownTitle').innerText =
-            `Pages affected by this issue (${(ruleInCategory.pagesAffectedCount || ruleInCategory.pagesAffected.length)})`;
+            t('ruleModal.pagesAffected', { count: (ruleInCategory.pagesAffectedCount || ruleInCategory.pagesAffected.length) });
           buildExpandedRuleCategoryContent(category, ruleInCategory);
           document.getElementById('expandedRulePageContent').innerText =
-            `Total ${(ruleInCategory.pagesAffectedCount || ruleInCategory.pagesAffected.length)} affected pages`;
+            t('ruleModal.totalAffectedPages', { count: (ruleInCategory.pagesAffectedCount || ruleInCategory.pagesAffected.length) });
         }
       }
     });

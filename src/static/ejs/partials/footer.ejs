@@ -1,4 +1,4 @@
-<footer aria-label="Report footer" id="footer" class="card w-100">
+<footer aria-label="<%= t('footer.ariaLabel') %>" id="footer" class="card w-100">
   <div class="row mx-0">
     <div class="col-sm-6 text-sm-start">
       <%
@@ -7,18 +7,18 @@
     
         // Use %0A for line breaks in the body
         const mailtoAddress = `oobee@wogaa.gov.sg`;
-        const mailtoSubject = encodeURIComponent(`Support Request - Oobee Version ${oobeeAppVersion}`);
-        const mailtoBody = encodeURIComponent(`URL Scanned: ${urlScanned}\nVersion: ${oobeeAppVersion}`);
+        const mailtoSubject = encodeURIComponent(t('footer.supportSubject', { version: oobeeAppVersion }));
+        const mailtoBody = encodeURIComponent(t('footer.supportBody', { url: urlScanned, version: oobeeAppVersion }));
         const feedbackEmail = `mailto:${mailtoAddress}?subject=${mailtoSubject}&body=${mailtoBody}`;
       %>
     
-        <a href="<%=feedbackEmail%>" aria-label="Send feedback to <%=mailtoAddress%>" target="_blank">Help us improve</a>
+        <a href="<%=feedbackEmail%>" aria-label="<%= t('footer.sendFeedbackTo', { email: mailtoAddress }) %>" target="_blank"><%= t('footer.helpUsImprove') %></a>
         <hr class="d-sm-none" />
     </div>
     <div class="col-sm-6 text-sm-end">
-      Created by
+      <%= t('footer.createdBy') %>
       <a href="https://go.gov.sg/a11y" target="_blank">GovTech Accessibility Enabling Team</a> |
-      <a href="https://go.gov.sg/oobee-report-third-party-licenses" target="_blank">Third-Party Licenses</a>
+      <a href="https://go.gov.sg/oobee-report-third-party-licenses" target="_blank"><%= t('footer.thirdPartyLicenses') %></a>
     </div>
   </div>
 </footer>

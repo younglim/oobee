@@ -1,18 +1,18 @@
 <div id="wcag-compliance-card" class="wcag-card <%= isInspectPresetScan ? 'inspect-preset-wcag-card' : '' %>">
   <div class="wcag-row">
     <div>
-      <h2 class="wcag-title">WCAG Score</h2>
+      <h2 class="wcag-title"><%= t('wcag.score') %></h2>
 
       <p class="wcag-sub">
         <% if (isInspectPresetScan) { %>
-          Based on <%= inspectPresetScanDate %> WOGAA Inspect rescan preset
+          <%= t('wcag.basedOnInspect', { date: inspectPresetScanDate }) %>
         <% } else { %>
-          Based on Automated Checks
+          <%= t('wcag.basedOnAutomated') %>
         <% } %>
       </p>
 
       <p id="wcagStatus" class="wcag-status" hidden>
-        This website does not meet the minimum accessibility standards.
+        <%= t('wcag.notMeetMinimum') %>
       </p>
     </div>
 

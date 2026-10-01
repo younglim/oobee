@@ -10,17 +10,17 @@
       <%- include("components/prioritiseIssues/PrioritiseIssues") %>
       <!-- jsOffMessage -->
       <p id="jsOffMessage" class="mx-3">
-        Please open this file in a browser to experience the report's full functionality.
+        <%= t('report.jsOffMessage') %>
       </p>
       <%- include("components/allIssues/AllIssues") %>
       <div id="jsOn" class="d-none">
         <%- include("components/ruleModal/ruleOffcanvas") %>
-        <p id="containsAISuggestions" class="d-none">Tooltip: Contains AI suggestions.</p>
-        <p id="mustFixAriaDescription" class="d-none">Tooltip: <%= items.mustFix.description %></p>
+        <p id="containsAISuggestions" class="d-none"><%= t('report.tooltip', { text: t('report.containsAiSuggestions') }) %></p>
+        <p id="mustFixAriaDescription" class="d-none"><%= t('report.tooltip', { text: items.mustFix.description }) %></p>
         <p id="goodToFixAriaDescription" class="d-none">
-          Tooltip: <%= items.goodToFix.description %>
+          <%= t('report.tooltip', { text: items.goodToFix.description }) %>
         </p>
-        <p id="passedAriaDescription" class="d-none">Tooltip: <%= items.passed.description %></p>
+        <p id="passedAriaDescription" class="d-none"><%= t('report.tooltip', { text: items.passed.description }) %></p>
       </div>
     </section>
   </main>

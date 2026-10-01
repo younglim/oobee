@@ -263,11 +263,7 @@
 
       tbody.innerHTML = filteredIssues
         .map(issue => {
-          const severityLabel = {
-            mustFix: 'Must Fix',
-            goodToFix: 'Good to Fix',
-            needsReview: 'Manual Test',
-          }[issue.category];
+          const severityLabel = t(`common.severity.${issue.category}`);
 
           const severityClass = issue.category.replace(/([A-Z])/g, '-$1').toLowerCase();
 
@@ -285,12 +281,13 @@
 
           const disabilitiesBadges = issue.disabilities
             .map(disability => {
-              return `<span class="conformance-badge" title="${htmlEscapeString(disability)}">${htmlEscapeString(disability)} Disability</span>`;
+              const disabilityLabel = formatDisabilityList([disability]);
+              return `<span class="conformance-badge" title="${htmlEscapeString(disability)}">${htmlEscapeString(disabilityLabel)}</span>`;
             })
             .join('');
 
           return `
-          <tr class="issue-row" data-category="${htmlEscapeString(issue.category)}" data-rule-id="${htmlEscapeString(issue.ruleId)}" role="button" tabindex="0" aria-label="${htmlEscapeString(issue.description)}, ${htmlEscapeString(severityLabel)}, ${issue.totalItems} occurrences">
+          <tr class="issue-row" data-category="${htmlEscapeString(issue.category)}" data-rule-id="${htmlEscapeString(issue.ruleId)}" role="button" tabindex="0" aria-label="${htmlEscapeString(t('allIssues.rowAria', { description: issue.description, severity: severityLabel, count: issue.totalItems }))}">
             <td>
               <span class="category-badge ${severityClass}">${severityLabel}</span>
             </td>
@@ -303,7 +300,7 @@
               </div>
             </td>
             <td>
-              <span class="occurrence-count">${issue.totalItems} occ.</span>
+              <span class="occurrence-count">${t('common.occAbbrev', { count: issue.totalItems })}</span>
             </td>
             <td>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -353,9 +350,9 @@
       const allCount = allIssues.length;
 
       if (totalCount === allCount) {
-        countElement.textContent = `Total ${totalCount} issues`;
+        countElement.textContent = t('allIssues.totalIssues', { count: totalCount });
       } else {
-        countElement.textContent = `Showing ${totalCount} issues`;
+        countElement.textContent = t('allIssues.showingIssues', { count: totalCount });
       }
     }
 

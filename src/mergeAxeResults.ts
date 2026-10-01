@@ -10,11 +10,9 @@ import constants, {
   BrowserTypes,
   ScannerTypes,
   WCAGclauses,
-  a11yRuleShortDescriptionMap,
   disabilityBadgesMap,
-  a11yRuleLongDescriptionMap,
-  a11yRuleStepByStepGuide,
 } from './constants/constants.js';
+import { getBundle, getWcagClauses, getItemTypeDescription, getLanguage, getRuleTexts, t } from './i18n/index.js';
 import { getBrowserToRun, getPlaywrightLaunchOptions } from './constants/common.js';
 
 import {
@@ -114,6 +112,17 @@ const parseContentToJson = async (rPath: string) => {
   }
 };
 
+// Adds the template-side i18n helpers (`t`, `lang`, `uiBundle`) to the EJS render data.
+const withI18n = (allIssues: AllIssues) => {
+  const lang = allIssues.lang || getLanguage();
+  return {
+    ...allIssues,
+    lang,
+    t: (key: string, vars?: Record<string, string | number>) => t(`ui.${key}`, vars, lang),
+    uiBundle: getBundle(lang).ui ?? {},
+  };
+};
+
 const compileHtmlWithEJS = async (
   allIssues: AllIssues,
   storagePath: string,
@@ -125,7 +134,10 @@ const compileHtmlWithEJS = async (
     filename: path.join(dirname, './static/ejs/report.ejs'),
   });
 
-  const html = template({ ...allIssues, storagePath: JSON.stringify(storagePath) });
+  const html = template({
+    ...withI18n(allIssues),
+    storagePath: JSON.stringify(storagePath),
+  });
   await fs.writeFile(htmlFilePath, html);
 
   let htmlContent = await fs.readFile(htmlFilePath, { encoding: 'utf8' });
@@ -346,7 +358,7 @@ const writeSummaryHTML = async (
   const template = ejs.compile(ejsString, {
     filename: path.join(dirname, './static/ejs/summary.ejs'),
   });
-  const html = template(allIssues);
+  const html = template(withI18n(allIssues));
   fs.writeFileSync(`${storagePath}/${htmlFilename}.html`, html);
 };
 
@@ -609,7 +621,7 @@ const getTopTenIssues = allIssues => {
         category,
         ruleId: rule.rule,
         // Replace description with new Oobee short description if available
-        description: a11yRuleShortDescriptionMap[rule.rule] || rule.description,
+        description: getRuleTexts().shortDescriptionMap[rule.rule] || rule.description,
         axeImpact: rule.axeImpact,
         conformance: rule.conformance,
         totalItems: rule.totalItems,
@@ -822,6 +834,9 @@ const generateArtifacts = async (
   const oobeeAppVersion = getVersion();
   const isCustomFlow = scanType === ScannerTypes.CUSTOM;
   const isInspectPresetScan = resolveInspectPresetScanEnabled();
+  const lang = getLanguage();
+  const ruleTexts = getRuleTexts(lang);
+  const localisedItemTypeDescription = getItemTypeDescription(lang);
   const inspectPresetMetadata = resolveInspectPresetMetadata();
   const resolvedUrlScanned = inspectPresetMetadata?.siteUrl || urlScanned;
 
@@ -869,25 +884,25 @@ const generateArtifacts = async (
     oobeeAppVersion,
     items: {
       mustFix: {
-        description: itemTypeDescription.mustFix,
+        description: localisedItemTypeDescription.mustFix,
         totalItems: 0,
         totalRuleIssues: 0,
         rules: [],
       },
       goodToFix: {
-        description: itemTypeDescription.goodToFix,
+        description: localisedItemTypeDescription.goodToFix,
         totalItems: 0,
         totalRuleIssues: 0,
         rules: [],
       },
       needsReview: {
-        description: itemTypeDescription.needsReview,
+        description: localisedItemTypeDescription.needsReview,
         totalItems: 0,
         totalRuleIssues: 0,
         rules: [],
       },
       passed: {
-        description: itemTypeDescription.passed,
+        description: localisedItemTypeDescription.passed,
         totalItems: 0,
         totalRuleIssues: 0,
         rules: [],
@@ -895,11 +910,12 @@ const generateArtifacts = async (
     },
     cypressScanAboutMetadata,
     wcagLinks: constants.wcagLinks,
-    wcagClauses: WCAGclauses,
-    a11yRuleShortDescriptionMap,
+    wcagClauses: getWcagClauses(lang),
+    lang,
+    a11yRuleShortDescriptionMap: ruleTexts.shortDescriptionMap,
     disabilityBadgesMap,
-    a11yRuleLongDescriptionMap,
-    a11yRuleStepByStepGuide,
+    a11yRuleLongDescriptionMap: ruleTexts.longDescriptionMap,
+    a11yRuleStepByStepGuide: ruleTexts.stepByStepGuide,
     wcagCriteriaLabels: constants.wcagCriteriaLabels,
     scanPagesDetail: {
       pagesAffected: [],

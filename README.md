@@ -98,6 +98,7 @@ verapdf --version
 | OOBEE_SLOWMO | Experimental flag to slow down web browser behaviour by specified duration (in miliseconds) | |
 | OOBEE_TAGGED_WEBSITE | Tag to identify the website in telemetry. Can also be set via `-z, --websiteTag` CLI flag (CLI flag takes precedence). | |
 | OOBEE_SCAN_METADATA | Overrides the `entryUrl` tag sent to telemetry. | |
+| OOBEE_LANG | ISO 639-1 language for the report and axe-core issue text (`en`, `ja`). Can also be set via `-n, --lang` CLI flag (CLI flag takes precedence). | `en` |
 | OOBEE_SCAN_PRODUCT | Adds a `scanProduct` tag to telemetry events. | |
 | OOBEE_CONSECUTIVE_MAX_RETRIES | Max consecutive HTTP failures before the circuit breaker aborts the crawl. `0` disables this check. | `0` (disabled) |
 | OOBEE_MAX_RATCHET_CYCLES | Max number of concurrency halvings without a full recovery before the crawl aborts. `0` disables this check. | `0` (disabled) |
@@ -420,6 +421,9 @@ Options:
                                      [string] [choices: "yes", "no"] [default: "no"]
   -l, --scanDuration                 Maximum scan duration in seconds (0 means u
                                      nlimited)             [number] [default: 0]
+  -n, --lang                         ISO 639-1 language code for the report and
+                                     axe-core issue text (e.g. en, ja). Defaults
+                                     to OOBEE_LANG env var, or en.     [string]
   -z, --websiteTag                   Tag to identify the website in telemetry.
                                      Overrides OOBEE_TAGGED_WEBSITE env var.
                                                                        [string]

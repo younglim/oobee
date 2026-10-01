@@ -2,7 +2,7 @@
   <div class="issue-detail-content">
     <!-- Image placeholder -->
     <div class="issue-detail-image-container">
-      <img id="issueDetailImage" src="" alt="Issue illustration" class="issue-detail-image" />
+      <img id="issueDetailImage" src="" alt="<%= t('ruleModal.issueIllustration') %>" class="issue-detail-image" />
     </div>
 
     <!-- Issue title -->
@@ -10,7 +10,7 @@
 
     <!-- Conformance badges -->
     <div class="issue-detail-conformance">
-      <span class="mustfix-badge-label">Must Fix</span>
+      <span class="mustfix-badge-label"><%= t('common.severity.mustFix') %></span>
       <div id="issueDetailConformance" class="issue-detail-conformance-badges"></div>
     </div>
 
@@ -24,7 +24,7 @@
 
     <!-- View issue details button -->
     <button id="viewIssueDetailsBtn" class="btn-view-issue-details">
-      View issue details
+      <%= t('prioritise.viewIssueDetails') %>
       <svg width="8" height="10" viewBox="0 0 6 10" aria-hidden="true" focusable="false">
         <path
           d="M0.726562 7.06L3.7799 4L0.726562 0.94L1.66656 0L5.66656 4L1.66656 8L0.726562 7.06Z"

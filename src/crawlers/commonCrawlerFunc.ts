@@ -24,6 +24,7 @@ import type { Response as PlaywrightResponse } from 'playwright';
 import fs from 'fs';
 import { ensureAndInjectSafeBrowsing } from '../safeBrowsingProfile.js';
 import path from 'path';
+import { getAxeLocale, getOobeeAxeTexts, formatRuntime } from '../i18n/index.js';
 
 // types
 interface AxeResultsWithScreenshot extends AxeResults {
@@ -475,17 +476,21 @@ const buildContrastRecommendation = (example: ContrastExample): string | null =>
   const parts: string[] = [];
   if (recFg) {
     const [rr, gg, bb] = recFg;
-    parts.push(`foreground text color to ${rgbToHex(rr, gg, bb)} (rgb(${rr}, ${gg}, ${bb}))`);
+    parts.push(
+      formatRuntime(getOobeeAxeTexts(), 'contrastRecFg', { hex: rgbToHex(rr, gg, bb), rgb: `rgb(${rr}, ${gg}, ${bb})` }),
+    );
   }
   if (recBg) {
     const [rr, gg, bb] = recBg;
-    parts.push(`background to ${rgbToHex(rr, gg, bb)} (rgb(${rr}, ${gg}, ${bb}))`);
+    parts.push(
+      formatRuntime(getOobeeAxeTexts(), 'contrastRecBg', { hex: rgbToHex(rr, gg, bb), rgb: `rgb(${rr}, ${gg}, ${bb})` }),
+    );
   }
 
   // Include the target ratio in the string so the message is unambiguous when
   // a single element has a mix of normal-text (4.5:1) and large-text (3:1)
   // failing combinations with different required thresholds.
-  return `${parts.join(' or ')}`;
+  return `${parts.join(formatRuntime(getOobeeAxeTexts(), 'contrastOr'))}`;
 };
 
 /**
@@ -590,17 +595,22 @@ const buildColorContrastMessage = (node: NodeResultWithScreenshot): string | nul
 
   const combos = [...uniqueCombos.values()];
 
+  const texts = getOobeeAxeTexts();
   const examples = combos
-    .map(
-      example =>
-        `foreground ${example.fgColor} on ${example.bgColor} at ${example.fontSize} ${example.fontWeight === 'bold' ? 'bold' : 'regular'} text`,
+    .map(example =>
+      formatRuntime(texts, 'contrastExample', {
+        fg: example.fgColor,
+        bg: example.bgColor,
+        fontSize: example.fontSize,
+        weight: formatRuntime(texts, example.fontWeight === 'bold' ? 'contrastBold' : 'contrastRegular'),
+      }),
     )
-    .join(', and ');
+    .join(formatRuntime(texts, 'contrastAnd'));
 
   const targetRatio = combos[0]?.expectedContrastRatio || '4.5:1';
   const currentRatio = combos[0]?.contrastRatio || 'unknown';
 
-  const base = `Multiple text elements in this component fail WCAG 1.4.3 Color Contrast Minimum.\n  Normal text should meet or exceed ${targetRatio} contrast ratio against its actual background.\n  The current text contrast ratio of ${currentRatio} does not meet requirements. Failing combinations in this snippet include ${examples}.`;
+  const base = formatRuntime(texts, 'contrastBase', { targetRatio, currentRatio, examples });
 
   const recommendations = combos
     .map(buildContrastRecommendation)
@@ -608,7 +618,7 @@ const buildColorContrastMessage = (node: NodeResultWithScreenshot): string | nul
 
   const recSection =
     recommendations.length > 0
-      ? `\n  Recommendation: Adjust ${recommendations.join('; ')}.`
+      ? formatRuntime(texts, 'contrastRecommendation', { list: recommendations.join(formatRuntime(texts, 'contrastListSep')) })
       : '';
 
   const ctx = node.contrastDOMContext;
@@ -618,49 +628,49 @@ const buildColorContrastMessage = (node: NodeResultWithScreenshot): string | nul
 
   if (ctx.hasGradient) {
     notes.push(
-      `gradient background detected (${ctx.backgroundImage}): the sampled background color represents a single point — verify contrast at every gradient stop and position where text appears, then adjust the gradient stops or add a solid color fallback behind the text`,
+      formatRuntime(texts, 'contrastNoteGradient', { value: ctx.backgroundImage }),
     );
   } else if (ctx.ancestorHasGradient) {
     notes.push(
-      `an ancestor provides a gradient background: the sampled background color may not match what is visually beneath the text — verify contrast against the actual rendered gradient`,
+      formatRuntime(texts, 'contrastNoteAncestorGradient'),
     );
   }
 
   if (ctx.hasBackgroundImage) {
     notes.push(
-      `background image detected: contrast cannot be fully determined from a sampled color alone — ensure text remains readable across all image content and states`,
+      formatRuntime(texts, 'contrastNoteBgImage'),
     );
   } else if (ctx.ancestorHasBackgroundImage) {
     notes.push(
-      `an ancestor has a background image: the effective background under this text may differ from the sampled value`,
+      formatRuntime(texts, 'contrastNoteAncestorBgImage'),
     );
   }
 
   if (ctx.hasReducedOpacity) {
     notes.push(
-      `opacity less than 1 detected on this element or an ancestor: the rendered contrast is lower than the computed color values indicate`,
+      formatRuntime(texts, 'contrastNoteOpacity'),
     );
   }
 
   if (ctx.mixBlendMode) {
     notes.push(
-      `mix-blend-mode: ${ctx.mixBlendMode} is applied: actual rendered colors depend on the underlying layers`,
+      formatRuntime(texts, 'contrastNoteBlend', { value: ctx.mixBlendMode }),
     );
   }
 
   if (ctx.backdropFilter) {
-    notes.push(`backdrop-filter: ${ctx.backdropFilter} is applied: the effective background appearance is modified`);
+    notes.push(formatRuntime(texts, 'contrastNoteBackdrop', { value: ctx.backdropFilter }));
   }
 
   if (ctx.filter) {
     notes.push(
-      `CSS filter: ${ctx.filter} is applied to this element: rendered colors may differ from computed values`,
+      formatRuntime(texts, 'contrastNoteFilter', { value: ctx.filter }),
     );
   }
 
   const ctxSection =
     notes.length > 0
-      ? `\n  Rendering complexity: ${notes.join('; ')}.\n  The color fix recommendations above may not be accurate for this element — manual verification of the actual rendered contrast is strongly advised.`
+      ? formatRuntime(texts, 'contrastRenderingComplexity', { list: notes.join(formatRuntime(texts, 'contrastListSep')) })
       : '';
 
   return `${base}${recSection}${ctxSection}`;
@@ -715,14 +725,31 @@ export const enrichViolationMessages = async (results: AxeResults, page: Page): 
 
         if (width === undefined || height === undefined) continue;
 
+        // Read closestOffset from check data rather than parsing the (possibly
+        // localised) failureSummary text.
+        const offsetCheck = [...(node.any || []), ...(node.all || []), ...(node.none || [])].find(
+          c => c.id === 'target-offset',
+        ) as { data?: { closestOffset?: number } } | undefined;
         const spacingMatch = node.failureSummary?.match(/diameter of (\d+)px/);
-        const spacing = spacingMatch ? spacingMatch[1] : null;
+        const spacing =
+          offsetCheck?.data?.closestOffset !== undefined
+            ? String(offsetCheck.data.closestOffset)
+            : spacingMatch
+              ? spacingMatch[1]
+              : null;
 
-        const boxSizingLabel = ctx ? ` (box-sizing: ${ctx.boxSizing})` : '';
-        let message = `Insufficient target size: ${width}px by ${height}px${boxSizingLabel}.\n  Ensure it is at least 24px by 24px.`;
+        const texts = getOobeeAxeTexts();
+        const boxSizingLabel = ctx
+          ? formatRuntime(texts, 'targetSizeBoxSizing', { value: ctx.boxSizing })
+          : '';
+        let message = formatRuntime(texts, 'targetSize', {
+          width,
+          height,
+          boxSizing: boxSizingLabel,
+        });
 
         if (spacing) {
-          message += `\n  Target has insufficient space to its adjacent element of ${spacing}px. Ensure it has a safe clickable space of at least 24px.`;
+          message += formatRuntime(texts, 'targetSizeSpacing', { spacing });
         }
 
         if (
@@ -730,7 +757,7 @@ export const enrichViolationMessages = async (results: AxeResults, page: Page): 
           ctx.boxSizing === 'border-box' &&
           (ctx.inlineWidth !== null || ctx.inlineHeight !== null)
         ) {
-          message += `\n  Current button style code snippet does not increase the hit area.\n  Remove the explicit width/height and use min-width: 24px; min-height: 24px instead.\n  Or place the visual content in a child <span> element.`;
+          message += formatRuntime(texts, 'targetSizeInlineStyle');
         }
 
         node.failureSummary = message;
@@ -751,13 +778,14 @@ export const enrichViolationMessages = async (results: AxeResults, page: Page): 
           .catch(() => null);
 
         if (ctx) {
-          let message = `Value of lang attribute is not a valid language.\n  Use a registered IANA language code instead of "${ctx.langValue}".`;
+          const texts = getOobeeAxeTexts();
+          let message = formatRuntime(texts, 'validLang', { langValue: ctx.langValue });
 
           if (ctx.langValue.startsWith('x-')) {
-            message += `\n  Axe-core valid-lang rule also rejects private-use subtags.`;
+            message += formatRuntime(texts, 'validLangPrivateUse');
           }
 
-          message += `\n  Identify the actual language of this text and use its registered BCP 47 code (e.g., lang="it" Italian, "es" Spanish, "fr" French, "de" German, "zh" Chinese, "ja" Japanese, "ko" Korean, "pt" Portuguese, "ar" Arabic).`;
+          message += formatRuntime(texts, 'validLangHint');
 
           node.failureSummary = message;
         }
@@ -1113,6 +1141,8 @@ export const runAxeScript = async ({
       getAxeConfigurationFunctionString,
       flagUnlabelledClickableElementsFunctionString,
       xPathToCssFunctionString,
+      axeLocale,
+      oobeeTexts,
     }) => {
       try {
         // Load functions into the browser context
@@ -1163,6 +1193,8 @@ export const runAxeScript = async ({
           enableWcagAaa,
           gradingReadabilityFlag,
           disableOobee,
+          locale: axeLocale,
+          oobeeTexts,
         });
 
         axe.configure(axeConfig);
@@ -1419,8 +1451,8 @@ export const runAxeScript = async ({
               id: 'oobee-accessible-label',
               impact: 'serious' as ImpactValue,
               tags: ['wcag2a', 'wcag211', 'wcag412'],
-              description: 'Ensures clickable elements have an accessible label.',
-              help: 'Clickable elements (i.e. elements with mouse-click interaction) must have accessible labels.',
+              description: oobeeTexts.runtime.accessibleLabelDescription,
+              help: oobeeTexts.runtime.accessibleLabelHelpViolation,
               helpUrl: 'https://www.deque.com/blog/accessible-aria-buttons',
               nodes: escapedCssSelectors
                 .map((cssSelector: string): NodeResult => {
@@ -1428,15 +1460,14 @@ export const runAxeScript = async ({
                     html: findElementByCssSelector(cssSelector),
                     target: [cssSelector],
                     impact: 'serious' as ImpactValue,
-                    failureSummary:
-                      'Fix any of the following:\n  The clickable element does not have an accessible label.',
+                    failureSummary: oobeeTexts.runtime.accessibleLabelFailure,
                     any: [
                       {
                         id: 'oobee-accessible-label',
                         data: null,
                         relatedNodes: [],
                         impact: 'serious',
-                        message: 'The clickable element does not have an accessible label.',
+                        message: oobeeTexts.runtime.accessibleLabelMessage,
                       },
                     ],
                     all: [],
@@ -1478,6 +1509,8 @@ export const runAxeScript = async ({
       getAxeConfigurationFunctionString: getAxeConfiguration.toString(),
       flagUnlabelledClickableElementsFunctionString: flagUnlabelledClickableElements.toString(),
       xPathToCssFunctionString: xPathToCss.toString(),
+      axeLocale: getAxeLocale(),
+      oobeeTexts: getOobeeAxeTexts(),
     },
   );
   } catch (e) {

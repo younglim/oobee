@@ -38,7 +38,7 @@
 		if (gauge) {
 			gauge.setAttribute(
 				'aria-label',
-				`WCAG A & AA automated checks passed: ${checksPassed} out of ${totalChecks}`
+				t('wcag.gaugeAriaDetailed', { passed: checksPassed, total: totalChecks })
 			);
 		}
 	}

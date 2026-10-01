@@ -28,6 +28,7 @@ import { cliOptions, messageOptions } from './constants/cliFunctions.js';
 import combineRun from './combine.js';
 import { Answers } from './index.js';
 import { consoleLogger } from './logs.js';
+import { getLanguage, setLanguage } from './i18n/index.js';
 
 const appVersion = getVersion();
 const yargs = _yargs(hideBin(process.argv));
@@ -228,6 +229,8 @@ if (!options.strategy) {
   options.strategy = options.scanner === ScannerTypes.SITEMAP ? 'ignore' : 'same-domain';
 }
 
+setLanguage((options as any).lang ?? process.env.OOBEE_LANG);
+
 if (options.websiteTag) {
   process.env.OOBEE_TAGGED_WEBSITE = options.websiteTag;
 }
@@ -334,6 +337,7 @@ const optionsAnswer: Answers = {
   ruleset: options.ruleset,
   generateJsonFiles: options.generateJsonFiles,
   scanDuration: options.scanDuration,
+  lang: getLanguage(),
 };
 
 await scanInit(optionsAnswer);
