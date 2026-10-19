@@ -4,10 +4,12 @@ import { evaluateAltText } from "./evaluateAltText.js";
 export function getAxeConfiguration({
   enableWcagAaa = false,
   gradingReadabilityFlag = '',
+  agentDocsFlag = '',
   disableOobee = false,
 }: {
   enableWcagAaa?: boolean;
   gradingReadabilityFlag?: string;
+  agentDocsFlag?: string;
   disableOobee?: boolean;
 }) {
   function getReadabilityInterpretation(score: string): string {
@@ -61,6 +63,21 @@ export function getAxeConfiguration({
           },
         ]
         : []),
+      ...(agentDocsFlag !== ''
+        ? [
+          {
+            id: 'oobee-agent-friendly-docs',
+            metadata: {
+              impact: 'moderate' as ImpactValue,
+              messages: {
+                pass: 'The site is agent-friendly.',
+                fail: agentDocsFlag,
+              },
+            },
+            evaluate: (_node: HTMLElement) => false,
+          },
+        ]
+        : []),
     ],
     rules: [
       { id: 'target-size', enabled: true },
@@ -100,6 +117,21 @@ export function getAxeConfiguration({
                 'Text content should be easy to understand for individuals with education levels up to university graduates. If the text content is difficult to understand, provide supplemental content or a version that is easy to understand.',
               help: 'Text content should be clear and plain to ensure that it is easily understood.',
               helpUrl: 'https://www.wcag.com/uncategorized/3-1-5-reading-level/',
+            },
+          }]
+        : []),
+      ...(agentDocsFlag !== ''
+        ? [{
+            id: 'oobee-agent-friendly-docs',
+            selector: 'html',
+            enabled: true,
+            any: ['oobee-agent-friendly-docs'],
+            tags: ['best-practice'],
+            metadata: {
+              description:
+                'Ensures the site exposes its content in forms AI agents and assistive tools can fetch and read, such as llms.txt and markdown versions of pages.',
+              help: 'Site content should be easy for AI agents to find and read.',
+              helpUrl: 'https://afdocs.dev/quick-start',
             },
           }]
         : []),

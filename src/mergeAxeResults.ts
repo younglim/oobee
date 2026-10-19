@@ -941,10 +941,11 @@ const generateArtifacts = async (
     advancedScanOptionsSummaryItems: {
       showIncludeScreenshots: [true].includes(scanDetails.isIncludeScreenshots),
       showAllowSubdomains: ['same-domain'].includes(scanDetails.isAllowSubdomains),
-      showEnableCustomChecks: ['default', 'enable-wcag-aaa'].includes(
-        scanDetails.isEnableCustomChecks?.[0],
-      ),
+      showEnableCustomChecks: !(scanDetails.isEnableCustomChecks || []).includes('disable-oobee'),
       showEnableWcagAaa: (scanDetails.isEnableWcagAaa || []).includes('enable-wcag-aaa'),
+      showEnableAgentDocs:
+        !(scanDetails.isEnableCustomChecks || []).includes('disable-oobee') &&
+        (scanDetails.isEnableCustomChecks || []).includes('enable-agent-docs'),
       showSlowScanMode: [1].includes(scanDetails.isSlowScanMode),
       showAdhereRobots: [true].includes(scanDetails.isAdhereRobots),
     },

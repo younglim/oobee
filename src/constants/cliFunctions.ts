@@ -262,9 +262,9 @@ export const cliOptions: { [key: string]: Options } = {
   },
   y: {
     alias: 'ruleset',
-    describe: 'Specify scan ruleset for accessibility checks',
+    describe:
+      'Specify scan ruleset for accessibility checks. Comma-separate to combine: default, disable-oobee, enable-wcag-aaa, enable-agent-docs',
     type: 'string',
-    choices: ['default', 'disable-oobee', 'enable-wcag-aaa', 'disable-oobee,enable-wcag-aaa'],
     demandOption: false,
     requiresArg: true,
     default: 'default',

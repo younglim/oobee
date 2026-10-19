@@ -191,6 +191,8 @@
       '<p>\n Unlabelled clickable elements are inaccessible because it prevents screen readers from effectively conveying the purpose of the element. This causes challenges for screen reader users to navigate and understand the webpage. Clickable elements should also be made focusable by screen readers unless deliberately excluded (e.g. decorative or functionally redundant).\n</p>',
     'oobee-grading-text-contents':
       '<p>\n Text content should be easy to understand for individuals with education levels up to university graduates. If the text content is difficult to understand, provide supplemental content or a version that is easy to understand.\n</p>',
+    'oobee-agent-friendly-docs':
+      '<p>\n AI agents and assistants read a site through raw HTTP requests, not a rendered browser. Publishing an llms.txt index, markdown versions of pages and server-rendered content lets them find and quote your content accurately for the people who rely on them. Scored with the open-source afdocs checks.\n</p>',
   };
 
   const stepByStepGuide = <%- JSON.stringify(a11yRuleStepByStepGuide) %>;

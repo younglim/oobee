@@ -679,6 +679,7 @@ export const a11yRuleShortDescriptionMap = {
   'html-xml-lang-mismatch': 'Make different page language settings match',
   'valid-lang': 'Elements in different languages must use valid language codes',
   'oobee-grading-text-contents': 'Page content must use clear, plain language',
+  'oobee-agent-friendly-docs': 'Site content should be easy for AI agents to find and read',
   'form-field-multiple-labels': 'Form fields must have only one label element',
   'aria-allowed-attr': 'ARIA attributes must be used with appropriate roles',
   'aria-braille-equivalent': 'Braille abbreviated labels must have full text equivalents',
@@ -820,6 +821,8 @@ export const a11yRuleLongDescriptionMap = {
     'Language declarations using different formats (HTML and XML) need to match. If they disagree (e.g., lang="en" and xml:lang="fr" on the same element), screen readers and translation tools become confused about the content language.',
   'valid-lang':
     'When parts of a page use different languages (like a Spanish quote in an English article), those elements must be tagged with valid language codes. Invalid language codes prevent screen readers from switching to the correct pronunciation for that language.',
+  'oobee-agent-friendly-docs':
+    'Many people now reach web content through AI assistants and agents that summarise, translate or simplify it on their behalf, including people who rely on these tools because of a cognitive, learning or visual disability. These agents read raw HTTP responses rather than rendered pages, so they need an llms.txt index, markdown versions of pages, server-rendered content and stable URLs. When a site lacks these, agents miss or misreport its content and the people relying on them get incomplete or wrong answers.',
   'oobee-grading-text-contents':
     'Text on the page should be clear and use simple language. This helps people with cognitive disabilities and non-native speakers understand content. Avoid jargon, long complex sentences, and unclear references.',
   'form-field-multiple-labels':
@@ -973,6 +976,7 @@ export const disabilityBadgesMap = {
   'html-xml-lang-mismatch': ['Learning'],
   'valid-lang': ['Learning'],
   'oobee-grading-text-contents': ['Learning', 'Visual'],
+  'oobee-agent-friendly-docs': ['Learning', 'Visual'],
   'form-field-multiple-labels': ['Visual'],
   'aria-allowed-attr': ['Visual'],
   'aria-braille-equivalent': ['Visual'],
@@ -1076,6 +1080,7 @@ export enum RuleFlags {
   DEFAULT = 'default',
   DISABLE_OOBEE = 'disable-oobee',
   ENABLE_WCAG_AAA = 'enable-wcag-aaa',
+  ENABLE_AGENT_DOCS = 'enable-agent-docs',
 }
 
 // Note: Not all status codes will appear as Crawler will handle it as best effort first. E.g. try to handle redirect
@@ -1476,6 +1481,12 @@ export const a11yRuleStepByStepGuide: Record<string, { check: string; fix: strin
     fix: '(Developer) Add valid language codes to elements in different languages. Use valid ISO codes e.g., "es" for Spanish sections. <p lang="es">Este es un párrafo en español</p>.',
     review: 'Test with a screen reader: Navigate to content in different languages and confirm the screen reader switches to correct pronunciation for each language.',
     learn: 'Review and learn more about this issue on A11y Playground',
+  },
+  'oobee-agent-friendly-docs': {
+    check: 'Read the score and the list of failed or warning checks under "Details" for this issue. Each line names the afdocs check (e.g. llms-txt-exists) and the fix it recommends. Start with the highest-impact items listed first, such as a missing llms.txt.',
+    fix: '(Developer) Publish an llms.txt at the site root with an H1 title, a one-line blockquote summary and markdown links to your key pages. Serve a markdown version of each page (at the page URL plus .md, or when requested with Accept: text/markdown), render main content on the server rather than only in JavaScript, and return real 404s and HTTP redirects for moved pages.',
+    review: 'Re-scan with agent-friendly docs checks enabled, or run "npx afdocs check https://your-site --format scorecard", and confirm the failed checks now pass. Ask an AI assistant to fetch and summarise one of your pages and check its answer matches the page.',
+    learn: 'Learn more about each check and how it is scored on afdocs.dev',
   },
   'oobee-grading-text-contents': {
     check: 'Identify the pages with the most complex or dense text content. Highlight sentences that are very long or use jargon/technical terms unfamiliar to general audiences.',

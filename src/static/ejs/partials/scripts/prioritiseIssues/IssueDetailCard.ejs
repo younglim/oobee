@@ -33,7 +33,12 @@
             }
           }
         }
-        
+
+        if (!imageSrc && issue.ruleId === 'oobee-agent-friendly-docs' && window.getWcagSvg) {
+          const svg = window.getWcagSvg('WCAG 3.1.5');
+          if (svg) imageSrc = window.svgToDataUrl ? window.svgToDataUrl(svg) : svg;
+        }
+
         if (!imageSrc) {
           imageContainer.style.display = 'none';
         } else {

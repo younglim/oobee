@@ -14,6 +14,7 @@ import { consoleLogger, guiInfoLog, silentLogger } from '../logs.js';
 import { enrichColorContrastDOMContext, takeScreenshotForHTMLElements } from '../screenshotFunc/htmlScreenshotFunc.js';
 import { isFilePath, waitForMainThreadIdle } from '../constants/common.js';
 import { extractAndGradeText } from './custom/extractAndGradeText.js';
+import { getAgentDocsFlag } from './custom/agentDocsScore.js';
 import { ItemsInfo } from '../mergeAxeResults.js';
 import { evaluateAltText } from './custom/evaluateAltText.js';
 import { escapeCssSelector } from './custom/escapeCssSelector.js';
@@ -1105,6 +1106,8 @@ export const runAxeScript = async ({
   const enableWcagAaa = ruleset.includes(RuleFlags.ENABLE_WCAG_AAA);
 
   const gradingReadabilityFlag = await extractAndGradeText(page); // Ensure flag is obtained before proceeding
+  const agentDocsFlag =
+    !disableOobee && ruleset.includes(RuleFlags.ENABLE_AGENT_DOCS) ? await getAgentDocsFlag(requestUrl) : '';
 
   try {
     await playwrightUtils.injectFile(page, axeScript);
@@ -1137,6 +1140,7 @@ export const runAxeScript = async ({
       disableOobee,
       enableWcagAaa,
       gradingReadabilityFlag,
+      agentDocsFlag,
       axeRecheckHydrationMs,
       axeRecheckIdleTimeoutMs,
       parentHtmlDepth,
@@ -1198,6 +1202,7 @@ export const runAxeScript = async ({
         const axeConfig = getAxeConfiguration({
           enableWcagAaa,
           gradingReadabilityFlag,
+          agentDocsFlag,
           disableOobee,
         });
 
@@ -1515,6 +1520,7 @@ export const runAxeScript = async ({
       disableOobee,
       enableWcagAaa,
       gradingReadabilityFlag,
+      agentDocsFlag,
       axeRecheckHydrationMs,
       axeRecheckIdleTimeoutMs,
       parentHtmlDepth: parentHtmlDepth,

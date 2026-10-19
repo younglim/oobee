@@ -214,6 +214,7 @@ export const generateHtmlReport = async (
         showAllowSubdomains: !!scanData.advancedScanOptionsSummaryItems?.showAllowSubdomains,
         showEnableCustomChecks: !!scanData.advancedScanOptionsSummaryItems?.showEnableCustomChecks,
         showEnableWcagAaa: !!scanData.advancedScanOptionsSummaryItems?.showEnableWcagAaa,
+        showEnableAgentDocs: !!scanData.advancedScanOptionsSummaryItems?.showEnableAgentDocs,
         showSlowScanMode: !!scanData.advancedScanOptionsSummaryItems?.showSlowScanMode,
         showAdhereRobots: !!scanData.advancedScanOptionsSummaryItems?.showAdhereRobots,
       },

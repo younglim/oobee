@@ -26,6 +26,7 @@ import { findElementByCssSelector } from './crawlers/custom/findElementByCssSele
 import { flagUnlabelledClickableElements } from './crawlers/custom/flagUnlabelledClickableElements.js';
 import xPathToCss from './crawlers/custom/xPathToCss.js';
 import { extractText } from './crawlers/custom/extractText.js';
+import { getAgentDocsFlag } from './crawlers/custom/agentDocsScore.js';
 import { gradeReadability } from './crawlers/custom/gradeReadability.js';
 import { BrowserContext, Page } from 'playwright';
 import { filter } from 'jszip';
@@ -44,6 +45,7 @@ declare global {
     runA11yScan: (
       elements?: any[],
       gradingReadabilityFlag?: string,
+      agentDocsFlag?: string,
     ) => Promise<{
       pageUrl: string;
       pageTitle: string;
@@ -112,6 +114,7 @@ const getOobeeFunctionsScript = (
       function getAxeConfiguration({
         enableWcagAaa = false,
         gradingReadabilityFlag = '',
+        agentDocsFlag = '',
         disableOobee = false,
       }) {
         return {
@@ -153,6 +156,21 @@ const getOobeeFunctionsScript = (
                         pass: 'The text content is easy to understand.',
                         fail: \`Text content is potentially difficult to read.\n  It scored \${gradingReadabilityFlag} out of 50 on the Flesch-Kincaid Readability Test.\n  \${getReadabilityInterpretation(gradingReadabilityFlag)}\`,
                         incomplete: \`Text content is potentially difficult to read.\n  It scored \${gradingReadabilityFlag} out of 50 on the Flesch-Kincaid Readability Test.\n  \${getReadabilityInterpretation(gradingReadabilityFlag)}\`,
+                      },
+                    },
+                    evaluate: (_node) => false,
+                  },
+                ]
+              : []),
+            ...((!disableOobee && agentDocsFlag !== '')
+              ? [
+                  {
+                    id: 'oobee-agent-friendly-docs',
+                    metadata: {
+                      impact: 'moderate',
+                      messages: {
+                        pass: 'The site is agent-friendly.',
+                        fail: agentDocsFlag,
                       },
                     },
                     evaluate: (_node) => false,
@@ -203,6 +221,23 @@ const getOobeeFunctionsScript = (
                   },
                 ]
               : []),
+            ...((!disableOobee && agentDocsFlag !== '')
+              ? [
+                  {
+                    id: 'oobee-agent-friendly-docs',
+                    selector: 'html',
+                    enabled: true,
+                    any: ['oobee-agent-friendly-docs'],
+                    tags: ['best-practice'],
+                    metadata: {
+                      description:
+                        'Ensures the site exposes its content in forms AI agents and assistive tools can fetch and read, such as llms.txt and markdown versions of pages.',
+                      help: 'Site content should be easy for AI agents to find and read.',
+                      helpUrl: 'https://afdocs.dev/quick-start',
+                    },
+                  },
+                ]
+              : []),
           ]
             .filter(rule => (disableOobee ? !rule.id.startsWith('oobee') : true))
             .concat(
@@ -227,7 +262,7 @@ const getOobeeFunctionsScript = (
       }
       window.getAxeConfiguration = getAxeConfiguration;
 
-      async function runA11yScan(elementsToScan = [], gradingReadabilityFlag = '') {
+      async function runA11yScan(elementsToScan = [], gradingReadabilityFlag = '', agentDocsFlag = '') {
 
         // Walk up N ancestors from a CSS selector's element and return that
         // ancestor's outerHTML for LLM sibling-context. Returns undefined when
@@ -269,7 +304,7 @@ const getOobeeFunctionsScript = (
           })
           .filter(item => item !== '');
   
-        (window).axe.configure((window).getAxeConfiguration({ disableOobee: (window).disableOobee, enableWcagAaa: (window).enableWcagAaa, gradingReadabilityFlag }));
+        (window).axe.configure((window).getAxeConfiguration({ disableOobee: (window).disableOobee, enableWcagAaa: (window).enableWcagAaa, gradingReadabilityFlag, agentDocsFlag }));
         const axeScanResults = await (window).axe.run(elementsToScan, {
           resultTypes: ['violations', 'passes', 'incomplete'],
         });
@@ -1013,9 +1048,14 @@ export const scanPage = async (
     page.on('console', consoleListener);
 
     try {
-      const scanResult = await page.evaluate(async () => {
-        return window.runA11yScan();
-      });
+      const agentDocsFlag =
+        !disableOobee && ruleset.includes(RuleFlags.ENABLE_AGENT_DOCS)
+          ? await getAgentDocsFlag(page.url())
+          : '';
+      const scanResult = await page.evaluate(
+        async flag => window.runA11yScan([], '', flag),
+        agentDocsFlag,
+      );
 
       await enrichViolationMessages(scanResult.axeScanResults, page);
       await enrichColorContrastDOMContext(scanResult.axeScanResults.violations, page);
