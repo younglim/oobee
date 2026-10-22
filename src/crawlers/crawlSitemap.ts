@@ -50,6 +50,7 @@ import { consoleLogger, guiInfoLog } from '../logs.js';
 import { ViewportSettingsClass } from '../combine.js';
 import { capturePageData } from './pageCapture.js';
 import { registerCrawler, unregisterCrawler, isShutdownRequested } from '../shutdownController.js';
+import { getResumedScannedCount, isResumingAggregatorScan } from '../services/aggregatorClient.js';
 
 const crawlSitemap = async ({
   sitemapUrl,
@@ -108,9 +109,13 @@ const crawlSitemap = async ({
   // aborting after that many minutes without a successful scan.
   const maxIdleMinutes = Number(process.env.OOBEE_MAX_IDLE_MINUTES) || 0;
   const maxIdleMs = maxIdleMinutes > 0 ? maxIdleMinutes * 60 * 1000 : 0;
-  const remainingBudget = fromCrawlIntelligentSitemap
-    ? Math.max(0, maxRequestsPerCrawl - urlsCrawledFromIntelligent.scanned.length)
-    : maxRequestsPerCrawl;
+  const remainingBudget = Math.max(
+    0,
+    maxRequestsPerCrawl -
+      (fromCrawlIntelligentSitemap
+        ? urlsCrawledFromIntelligent.scanned.length
+        : getResumedScannedCount()),
+  );
   const rateController = new CrawlRateController(
     remainingBudget,
     specifiedMaxConcurrency || constants.maxConcurrency,
@@ -154,9 +159,10 @@ const crawlSitemap = async ({
   // RequestList from the sitemap XML — RequestList entries bypass queue dedup.
   // Track previously scanned URLs so we can filter the RequestList upfront and
   // short-circuit the handler for any that slip through.
-  const scannedUrlSet = fromCrawlIntelligentSitemap
-    ? new Set<string>(urlsCrawled.scanned.map(item => normUrl(item.url)))
-    : null;
+  const scannedUrlSet =
+    fromCrawlIntelligentSitemap || isResumingAggregatorScan()
+      ? new Set<string>(urlsCrawled.scanned.map(item => normUrl(item.url)))
+      : null;
   const { playwrightDeviceDetailsObject } = viewportSettings;
   const { maxConcurrency } = constants;
   // Bind Basic-auth credentials to the entry URL's origin so Playwright

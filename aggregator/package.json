@@ -1,0 +1,14 @@
+{
+  "name": "oobee-aggregator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Stores partial and complete Oobee scan state in SQLite so scans can be resumed",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

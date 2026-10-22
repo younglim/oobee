@@ -14,6 +14,9 @@ export const alertMessageOptions = {
   borderColor: 'red',
 };
 
+// Resumed scans take their settings from the aggregator, so the usual required flags are optional.
+const isResumeRun = process.argv.some(a => a === '--resume' || a.startsWith('--resume='));
+
 export const cliOptions: { [key: string]: Options } = {
   c: {
     alias: 'scanner',
@@ -58,13 +61,13 @@ export const cliOptions: { [key: string]: Options } = {
           return null;
       }
     },
-    demandOption: true,
+    demandOption: !isResumeRun,
   },
   u: {
     alias: 'url',
     describe: 'Website URL you want to scan',
     type: 'string',
-    demandOption: true,
+    demandOption: !isResumeRun,
   },
   d: {
     alias: 'customDevice',
@@ -191,7 +194,7 @@ export const cliOptions: { [key: string]: Options } = {
     alias: 'nameEmail',
     describe: `To personalise your experience, we will be collecting your name, email address and app usage data. Your information fully complies with GovTech’s Privacy Policy. Please provide your name and email address in this format "John Doe:john@domain.com". Optional when OOBEE_DISABLE_TELEMETRY=1 is set.`,
     type: 'string',
-    demandOption: !isTelemetryDisabled(),
+    demandOption: !isTelemetryDisabled() && !isResumeRun,
   },
   t: {
     alias: 'specifiedMaxConcurrency',
@@ -344,6 +347,13 @@ To obtain the JSON files, you need to base64-decode the file followed by gunzip.
   z: {
     alias: 'websiteTag',
     describe: 'Tag to identify the website in telemetry. Overrides OOBEE_TAGGED_WEBSITE env var.',
+    type: 'string',
+    requiresArg: true,
+    demandOption: false,
+  },
+  resume: {
+    describe:
+      'Resume a scan stored in the aggregator (OOBEE_AGGREGATOR_URL) by its scan ID. All other scan settings are taken from the original scan.',
     type: 'string',
     requiresArg: true,
     demandOption: false,

@@ -15,6 +15,7 @@ import constants, {
   isRunningInContainer,
 } from './constants/constants.js';
 import { consoleLogger, errorsTxtPath, silentLogger } from './logs.js';
+import { stopAggregator } from './services/aggregatorClient.js';
 import { getAxeConfiguration } from './crawlers/custom/getAxeConfiguration.js';
 import JSZip from 'jszip';
 import { createReadStream, createWriteStream } from 'fs';
@@ -546,6 +547,9 @@ export const cleanUpAndExit = async (
     return;
   }
   __shuttingDown = true;
+
+  // No-op once the scan has already been finalized by combineRun.
+  await stopAggregator(exitCode === 0 ? undefined : 'interrupted').catch(() => {});
 
   try {
     await cleanUp(randomToken, isError);   // runs stopAll inside cleanUp

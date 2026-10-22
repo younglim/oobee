@@ -29,6 +29,12 @@ import { cliOptions, messageOptions } from './constants/cliFunctions.js';
 import combineRun from './combine.js';
 import { Answers } from './index.js';
 import { consoleLogger } from './logs.js';
+import {
+  attachToAggregatorScan,
+  fetchAggregatorScan,
+  isAggregatorConfigured,
+  registerAggregatorScan,
+} from './services/aggregatorClient.js';
 
 const appVersion = getVersion();
 const yargs = _yargs(hideBin(process.argv));
@@ -233,8 +239,11 @@ if (options.websiteTag) {
   process.env.OOBEE_TAGGED_WEBSITE = options.websiteTag;
 }
 
+const resumeScanId = (options as unknown as { resume?: string }).resume;
+
 const scanInit = async (argvs: Answers): Promise<string> => {
   const updatedArgvs = { ...argvs };
+  const startedAt = new Date().toISOString();
 
   // Cannot use data.browser and data.isHeadless as the connectivity check comes first before prepareData
   setHeadlessMode(updatedArgvs.browserToRun, updatedArgvs.headless);
@@ -308,6 +317,32 @@ const scanInit = async (argvs: Answers): Promise<string> => {
     }
   }
 
+  try {
+    if (resumeScanId) {
+      await attachToAggregatorScan(resumeScanId);
+      consoleLogger.info(`Resuming aggregator scan ${resumeScanId}`);
+    } else if (isAggregatorConfigured()) {
+      const scanId = await registerAggregatorScan({
+        oobeeVersion: appVersion,
+        answers: argvs as unknown as Record<string, unknown>,
+        type: data.type,
+        entryUrl: data.entryUrl,
+        randomToken: data.randomToken,
+        startedAt,
+      });
+      printMessage([`Aggregator scan ID: ${scanId}`, `Resume with: --resume ${scanId}`], messageOptions);
+      consoleLogger.info(`Registered aggregator scan ${scanId}`);
+      if (process.env.OOBEE_VERBOSE && process.send) {
+        process.send(JSON.stringify({ type: 'aggregatorScanId', payload: scanId }));
+      }
+    }
+  } catch (e) {
+    printMessage([`Unable to reach aggregator: ${e.message}`], messageOptions);
+    consoleLogger.error(`Aggregator registration failed: ${e.message}`);
+    cleanUpAndExit(1, data.randomToken);
+    return;
+  }
+
   const screenToScan = getScreenToScan(data.deviceChosen, data.customDevice, data.viewportWidth);
 
   printMessage([`Oobee version: ${appVersion}`, 'Starting scan...'], messageOptions);
@@ -318,7 +353,7 @@ const scanInit = async (argvs: Answers): Promise<string> => {
   return getStoragePath(data.randomToken);
 };
 
-const optionsAnswer: Answers = {
+let optionsAnswer: Answers = {
   scanner: options.scanner,
   header: options.header,
   browserToRun: options.browserToRun,
@@ -347,7 +382,24 @@ const optionsAnswer: Answers = {
   ruleset: options.ruleset,
   generateJsonFiles: options.generateJsonFiles,
   scanDuration: options.scanDuration,
+  websiteTag: options.websiteTag,
 };
+
+if (resumeScanId) {
+  if (!isAggregatorConfigured()) {
+    printMessage(['--resume requires OOBEE_AGGREGATOR_URL to be set.'], messageOptions);
+    await cleanUpAndExit(1);
+  }
+  try {
+    const saved = await fetchAggregatorScan(resumeScanId);
+    optionsAnswer = saved.metadata.answers as unknown as Answers;
+    consoleLogger.info(`Loaded aggregator scan ${resumeScanId} (status: ${saved.status})`);
+  } catch (e) {
+    printMessage([`Unable to load scan ${resumeScanId} from aggregator: ${e.message}`], messageOptions);
+    await cleanUpAndExit(1);
+  }
+  if (optionsAnswer.websiteTag) process.env.OOBEE_TAGGED_WEBSITE = optionsAnswer.websiteTag;
+}
 
 await scanInit(optionsAnswer);
 cleanUpAndExit(0);

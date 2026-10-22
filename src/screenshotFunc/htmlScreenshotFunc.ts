@@ -1,5 +1,6 @@
 // import { JSDOM } from "jsdom";
 import { createHash } from 'crypto';
+import { uploadScanFile } from '../services/aggregatorClient.js';
 import fs from 'fs';
 import path from 'path';
 // import { silentLogger } from '../logs.js';
@@ -191,6 +192,7 @@ const getScreenshotPath = (buffer: Buffer, randomToken: string): string => {
 
   // Save image file to local storage
   saveImageBufferToFile(buffer, `${randomToken}/${path}`);
+  uploadScanFile(path, buffer);
 
   return path;
 };

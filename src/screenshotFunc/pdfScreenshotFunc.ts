@@ -13,6 +13,7 @@ import assert from 'assert';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { consoleLogger, silentLogger } from '../logs.js';
+import { uploadScanFile } from '../services/aggregatorClient.js';
 import { TransformedRuleObject } from '../crawlers/pdfScanFunc.js';
 import { IBboxLocation, StructureTree, ViewportSize } from '../types/types.js';
 
@@ -341,6 +342,7 @@ const annotateAndSave = (origCanvas: Canvas, screenshotPath: string, viewport: V
       }
       try {
         fs.writeFileSync(indexedScreenshotPath, croppedImage);
+        uploadScanFile(`elemScreenshots/pdf/${path.basename(indexedScreenshotPath)}`, croppedImage);
       } catch (e) {
         consoleLogger.error('Error in writing screenshot:', e);
       }

@@ -55,6 +55,7 @@ import { consoleLogger, guiInfoLog } from '../logs.js';
 import { ViewportSettingsClass } from '../combine.js';
 import { capturePageData } from './pageCapture.js';
 import { registerCrawler, unregisterCrawler, isShutdownRequested } from '../shutdownController.js';
+import { getResumedScannedCount } from '../services/aggregatorClient.js';
 import { addUrlGuardScript } from './guards/urlGuard.js';
 
 const ALLOWED_NAV_PROTOCOLS = new Set(['http:', 'https:']);
@@ -461,9 +462,13 @@ const crawlDomain = async ({
   // aborting after that many minutes without a successful scan.
   const maxIdleMinutes = Number(process.env.OOBEE_MAX_IDLE_MINUTES) || 0;
   const maxIdleMs = maxIdleMinutes > 0 ? maxIdleMinutes * 60 * 1000 : 0;
-  const remainingBudget = fromCrawlIntelligentSitemap
-    ? Math.max(0, maxRequestsPerCrawl - urlsCrawledFromIntelligent.scanned.length)
-    : maxRequestsPerCrawl;
+  const remainingBudget = Math.max(
+    0,
+    maxRequestsPerCrawl -
+      (fromCrawlIntelligentSitemap
+        ? urlsCrawledFromIntelligent.scanned.length
+        : getResumedScannedCount()),
+  );
   const rateController = new CrawlRateController(
     remainingBudget,
     specifiedMaxConcurrency || constants.maxConcurrency,

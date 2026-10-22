@@ -28,6 +28,10 @@ import fs from 'fs';
 import { ensureAndInjectSafeBrowsing } from '../safeBrowsingProfile.js';
 import path from 'path';
 import { getDomain } from 'tldts';
+import {
+  wrapDatasetForAggregator,
+  wrapRequestQueueForAggregator,
+} from '../services/aggregatorClient.js';
 
 // types
 interface AxeResultsWithScreenshot extends AxeResults {
@@ -1566,8 +1570,11 @@ export const createCrawleeSubFolders = async (
   _randomToken: string,
   requestQueueName: string = 'crawlee_rq',
 ): Promise<{ dataset: Dataset; requestQueue: RequestQueue }> => {
-  const dataset = await Dataset.open('crawlee');
-  const requestQueue = await RequestQueue.open(requestQueueName);
+  const dataset = wrapDatasetForAggregator(await Dataset.open('crawlee'));
+  const requestQueue = wrapRequestQueueForAggregator(
+    await RequestQueue.open(requestQueueName),
+    requestQueueName,
+  );
   return { dataset, requestQueue };
 };
 

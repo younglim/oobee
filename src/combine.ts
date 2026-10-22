@@ -19,7 +19,15 @@ import {
   uploadFolderToS3,
 } from './services/s3Uploader.js';
 import { writeManifest, resetCaptureEntries, isPageCaptureEnabled } from './crawlers/pageCapture.js';
-import { initShutdownHandler } from './shutdownController.js';
+import { initShutdownHandler, isShutdownRequested } from './shutdownController.js';
+import {
+  isAggregatorActive,
+  isResumingAggregatorScan,
+  restoreAggregatorScan,
+  stopAggregator,
+  syncAggregatorUrlsCrawled,
+  trackUrlsCrawled,
+} from './services/aggregatorClient.js';
 
 // Class exports
 export class ViewportSettingsClass {
@@ -172,6 +180,17 @@ const combineRun = async (details: Data, deviceToScan: string) => {
   let uiCustomFlowLabel: string | undefined;
   let durationExceeded = false;
 
+  if (isAggregatorActive()) {
+    trackUrlsCrawled(constants.urlsCrawledObj);
+    if (isResumingAggregatorScan()) {
+      const { startedAt } = await restoreAggregatorScan(
+        getStoragePath(randomToken),
+        constants.urlsCrawledObj,
+      );
+      if (startedAt) scanDetails.startTime = new Date(startedAt);
+    }
+  }
+
   // Hard cap via OOBEE_MAX_SCAN_MINUTES (env). If set, clamp scanDuration so
   // hostile sites cannot keep the crawler alive past this wall-clock ceiling.
   // Uses seconds internally to match the existing scanDuration contract
@@ -321,6 +340,8 @@ const combineRun = async (details: Data, deviceToScan: string) => {
   scanDetails.endTime = new Date();
   scanDetails.urlsCrawled = urlsCrawledObj;
 
+  if (urlsCrawledObj) await syncAggregatorUrlsCrawled(urlsCrawledObj, 'crawled');
+
   if (scanDetails.urlsCrawled) {
     if (scanDetails.urlsCrawled.scanned.length > 0) {
       await createAndUpdateResultsFolders(randomToken);
@@ -351,6 +372,7 @@ const combineRun = async (details: Data, deviceToScan: string) => {
         generateJsonFiles,
         browser,
       );
+      await stopAggregator(isShutdownRequested() ? 'interrupted' : 'completed');
       const [name, email] = (nameEmail ?? '').split(':');
 
       // Upload results to S3 if environment variables are set
