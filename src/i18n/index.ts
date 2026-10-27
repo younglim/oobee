@@ -28,6 +28,10 @@ export const normalizeLanguage = (lang?: string): string => {
   return SUPPORTED_LANGUAGES.includes(base) ? base : DEFAULT_LANGUAGE;
 };
 
+// Report/scan language defaults to OOBEE_LANG only (not the terminal locale),
+// so library callers and existing CI pipelines keep producing English output
+// unless they opt in. The CLI entry point (cli.ts) additionally detects the
+// terminal/OS language — see detectLocale.ts.
 currentLanguage = normalizeLanguage(process.env.OOBEE_LANG);
 
 export const isSupportedLanguage = (lang?: string): boolean =>

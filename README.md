@@ -1,5 +1,7 @@
 # Oobee (CLI)
 
+**English** | [日本語](./README.ja.md)
+
 [Oobee](https://go.gov.sg/oobee-cli) (formerly known as Purple A11y) is a customisable, automated accessibility testing tool that allows software development teams to assess whether their products are user-friendly to persons with disabilities (PWDs).
 
 This is the engine and command-line interface (CLI) for Oobee. The official application can only be downloaded at [https://go.gov.sg/oobee-cli](https://go.gov.sg/oobee-cli). We recommend that you download the software only from the official link, as other sources and/or third party links may pose risks and/or compromise your system.
@@ -38,7 +40,7 @@ Please ensure the following requirements are met:
 
 #### Node.js
 
-- A Node distribution of 20 (LTS) or above.
+- Node.js 22.15 or above (Node 22 LTS or 24 LTS recommended). The npm scripts start Node with `--use-system-ca`, which older versions reject.
 - To check your version of Node, go into terminal and paste the command bellow
 
 ```shell
@@ -98,7 +100,7 @@ verapdf --version
 | OOBEE_SLOWMO | Experimental flag to slow down web browser behaviour by specified duration (in miliseconds) | |
 | OOBEE_TAGGED_WEBSITE | Tag to identify the website in telemetry. Can also be set via `-z, --websiteTag` CLI flag (CLI flag takes precedence). | |
 | OOBEE_SCAN_METADATA | Overrides the `entryUrl` tag sent to telemetry. | |
-| OOBEE_LANG | ISO 639-1 language for the report and axe-core issue text (`en`, `ja`). Can also be set via `-n, --lang` CLI flag (CLI flag takes precedence). | `en` |
+| OOBEE_LANG | ISO 639-1 language (`en`, `ja`) for the report (HTML, PDF, CSV/JSON), axe-core issue text, and the CLI help and messages. Can also be set via `-n, --lang` CLI flag (CLI flag takes precedence). When unset, the report is English and the CLI help follows the terminal/OS language — see [CLI language](#cli-language). | `en` |
 | OOBEE_SCAN_PRODUCT | Adds a `scanProduct` tag to telemetry events. | |
 | OOBEE_CONSECUTIVE_MAX_RETRIES | Max consecutive HTTP failures before the circuit breaker aborts the crawl. `0` disables this check. | `0` (disabled) |
 | OOBEE_MAX_RATCHET_CYCLES | Max number of concurrency halvings without a full recovery before the crawl aborts. `0` disables this check. | `0` (disabled) |
@@ -170,6 +172,8 @@ You can interact via your arrow keys.
 ❯ Sitemap
   Website
   Custom
+  Intelligent
+  Localfile
 ```
 
 ### Headless Mode
@@ -289,6 +293,8 @@ Custom flow allows you to specify a user journey by enabling you to click the sc
   Sitemap
   Website
 ❯ Custom
+  Intelligent
+  Localfile
 ```
 
 1. Specify the URL of the starting page you wish to scan
@@ -310,10 +316,10 @@ If the custom flow fails to start, you might be running multiple versions of Pla
 
 1. On Windows, delete the folder `%USERPROFILE%\AppData\Local\ms-playwright` where `%USERPROFILE%` is typically located at `C:\Users\<username>`.
 2. On MacOS, delete the folder `~/Library/Caches/ms-playwright` where `~` refers to `/Users/<username>`.
-3. Within PowerShell (Windows) or Terminal (MacOS) app, run the following two commands to re-install Playwright:
+3. Within PowerShell (Windows) or Terminal (MacOS) app, run the following command to re-install the Playwright version Oobee uses:
 
 ```Shell
-npx playwright@1.27.1 install
+npx playwright install chromium
 ```
 
 ### CLI Mode
@@ -321,34 +327,38 @@ npx playwright@1.27.1 install
 CLI mode is designed to be run in continuous integration (CI) environment.
 Run `npm run cli` for a set of command-line parameters available.
 
+The help text and CLI messages are shown in Japanese when your terminal or OS language is Japanese (see [CLI language](#cli-language)); the block below is the English output.
+
+<!-- cli-help:start -->
 ```shell
-Usage: npm run cli -- -c <crawler> -d <device> -w <view
-port> -u <url> OPTIONS
+Oobee version: <version>
+Usage: npm run cli -- -c <crawler> -d <device> -w <viewport> -u <url> OPTIONS
 
 Options:
       --help                         Show help                         [boolean]
   -c, --scanner                      Type of scan, 1) sitemap, 2) website crawl,
-                                      3) custom flow, 4) intelligent
-                                     elligent
-  [required] [choices: "sitemap", "website", "custom", "intelligent"]
+                                     3) custom flow, 4) intelligent 5) local
+                                     file                             [required]
   -u, --url                          Website URL you want to scan
                                                              [string] [required]
   -d, --customDevice                 Device you want to scan            [string]
   -w, --viewportWidth                Viewport width (in pixels) you want to scan
                                                                         [number]
   -o, --zip                          Zip filename to save results       [string]
-  -p, --maxpages                     Maximum number of pages to scan (default: 1
-                                     00). Only available in website and sitemap
+  -p, --maxpages                     Maximum number of pages to scan (default:
+                                     100). Only available in website and sitemap
                                      scans                              [number]
-  -f, --safeMode                     Disable dynamically clicking of page button
-                                     s and links to find links, which resolve is
-                                     sues on some websites. [yes / no]
+  -f, --safeMode                     Disable dynamically clicking of page
+                                     buttons and links to find links, which
+                                     resolve issues on some websites. [yes / no]
                                                         [string] [default: "no"]
   -h, --headless                     Run the scan in headless mode. [yes / no]
                                                        [string] [default: "yes"]
   -b, --browserToRun                 Browser to run the scan on: 1) Chromium, 2)
-                                      Chrome, 3) Edge. Defaults to Chromium.
-                     [choices: "chromium", "chrome", "edge"] [default: "chrome"]
+                                     Chrome, 3) Edge. Defaults to Chrome on
+                                     Windows and macOS (and on Linux when Chrome
+                                     is installed), otherwise the bundled
+                                     Chromium.
   -s, --strategy                     Controls crawl and redirect scope. Defaults
                                      to "same-domain" for all scan types.
                                      Sitemap scans keep every listed URL and
@@ -357,93 +367,124 @@ Options:
                                      hostname (www/non-www count as the same
                                      host). "ignore" (remote sitemap scans only)
                                      also stops scoping redirects.
-                             [choices: "same-domain", "same-hostname", "ignore"]
+    [choices: "same-domain", "same-hostname", "ignore"] [default: "same-domain"]
   -e, --exportDirectory              Preferred directory to store scan results.
                                      Path is relative to your home directory.
                                                                         [string]
-  -j, --customFlowLabel              Give Custom Flow Scan a label for easier re
-                                     ference in the report              [string]
+  -j, --customFlowLabel              Give Custom Flow Scan a label for easier
+                                     reference in the report            [string]
   -k, --nameEmail                    To personalise your experience, we will be
                                      collecting your name, email address and app
-                                      usage data. Your information fully complie
-                                     s with GovTech’s Privacy Policy. Please pro
-                                     vide your name and email address in this fo
-                                     rmat "John Doe:john@domain.com".
+                                     usage data. Your information fully complies
+                                     with GovTech’s Privacy Policy. Please
+                                     provide your name and email address in this
+                                     format "John Doe:john@domain.com". Optional
+                                     when OOBEE_DISABLE_TELEMETRY=1 is set.
                                                              [string] [required]
-  -t, --specifiedMaxConcurrency      Maximum number of pages to scan concurrentl
-                                     y. Use for sites with throttling. Defaults
-                                     to 25.                             [number]
+  -t, --specifiedMaxConcurrency      Maximum number of pages to scan
+                                     concurrently. Use for sites with
+                                     throttling. Defaults to 3 × available CPUs
+                                     (min 2, max 25).                   [number]
   -i, --fileTypes                    File types to include in the scan. Defaults
-                                      to html-only.
+                                     to html-only.
        [string] [choices: "all", "pdf-only", "html-only"] [default: "html-only"]
-  -x, --blacklistedPatternsFilename  Txt file that has a list of pattern of doma
-                                     ins to exclude from accessibility scan sepa
-                                     rated by new line
-                                            [string] [default: "exclusions.txt"]
-  -a, --additional                   Additional features to include in the repor
-                                     t:
-                                     screenshots - Include element screensho
-                                     ts in the generated report
-                                     none - Exclude
-                                     all additional features in the generated re
-                                     port
+  -x, --blacklistedPatternsFilename  Txt file that has a list of pattern of
+                                     domains to exclude from accessibility scan
+                                     separated by new line              [string]
+  -a, --additional                   Additional features to include in the
+                                     report:
+                                     screenshots - Include element screenshots
+                                     in the generated report
+                                     none - Exclude all additional features in
+                                     the generated report
               [string] [choices: "screenshots", "none"] [default: "screenshots"]
-  -q, --metadata                     Json string that contains additional scan m
-                                     etadata for telemetry purposes. Defaults to
-                                      "{}"              [string] [default: "{}"]
-  -r, --followRobots                 Crawler adheres to robots.txt rules if it e
-                                     xists. [yes / no]  [string] [default: "no"]
-  -m, --header                       The HTTP authentication header keys and the
-                                     ir respective values to enable crawler acce
-                                     ss to restricted resources.        [string]
-  -y, --ruleset                      Specify scan ruleset for accessibility chec
-                                     ks
-  [string] [choices: "default", "disable-oobee", "enable-wcag-aaa", "disable-oob
-                                       ee,enable-wcag-aaa"] [default: "default"]
+  -q, --metadata                     Json string that contains additional scan
+                                     metadata for telemetry purposes. Defaults
+                                     to "{}"            [string] [default: "{}"]
+  -r, --followRobots                 Crawler adheres to robots.txt rules if it
+                                     exists. [yes / no] [string] [default: "no"]
+  -m, --header                       The HTTP authentication header keys and
+                                     their respective values to enable crawler
+                                     access to restricted resources.    [string]
+  -y, --ruleset                      Specify scan ruleset for accessibility
+                                     checks
+               [string] [choices: "default", "disable-oobee", "enable-wcag-aaa",
+                           "disable-oobee,enable-wcag-aaa"] [default: "default"]
   -g, --generateJsonFiles            Generate two gzipped and base64-encoded
                                      JSON files containing the results of the
                                      accessibility scan:
-                                     1. `scanData.json`: Provides an overview of
-                                        the scan, including:
-                                        - WCAG compliance score
-                                        - Violated WCAG clauses
-                                        - Metadata (e.g., scan start and end times)
-                                        - Pages scanned and skipped
-                                     2. `scanItems.json`: Contains detailed
-                                        information about detected accessibility
-                                        issues, including:
-                                        - Severity levels
-                                        - Issue descriptions
-                                        - Related WCAG guidelines
-                                        - URL of the pages violated the WCAG clauses
-                                     Useful for in-depth analysis or integration
-                                     with external reporting tools.
 
-                                     To obtain the JSON files, you need to base64-decode
-                                     the file followed by gunzip. For example:
-                                     (macOS) base64 -D -i scanData.json.gz.b64 |
-                                     gunzip > scanData.json\n
+                                     1. scanData.json.gz.b64: Provides an
+                                     overview of the scan, including:
+                                     - WCAG compliance score
+                                     - Violated WCAG clauses
+                                     - Metadata (e.g., scan start and end
+                                     times)
+                                     - Pages scanned and skipped
+                                     2. scanItems.json.gz.b64: Contains
+                                     detailed information about detected
+                                     accessibility issues, including:
+                                     - Severity levels
+                                     - Issue descriptions
+                                     - Related WCAG guidelines
+                                     - URL of the pages violated the WCAG
+                                     clauses
+                                     Useful for in-depth analysis or
+                                     integration with external reporting
+                                     tools.
+
+                                     To obtain the JSON files, you need to
+                                     base64-decode the file followed by
+                                     gunzip. For example:
+
+                                     (macOS) base64 -D -i scanData.json.gz.b64
+                                     | gunzip > scanData.json
+
                                      (linux) base64 -d scanData.json.gz.b64 |
-                                     gunzip > scanData.json\n
-                                     [string] [choices: "yes", "no"] [default: "no"]
-  -l, --scanDuration                 Maximum scan duration in seconds (0 means u
-                                     nlimited)             [number] [default: 0]
+                                     gunzip > scanData.json
+
+                                                        [string] [default: "no"]
+  -l, --scanDuration                 Maximum scan duration in seconds (0 means
+                                     unlimited)            [number] [default: 0]
   -n, --lang                         ISO 639-1 language code for the report and
                                      axe-core issue text (e.g. en, ja). Defaults
-                                     to OOBEE_LANG env var, or en.     [string]
+                                     to OOBEE_LANG env var, or en. Also sets the
+                                     language of this help and CLI messages,
+                                     which otherwise follow the terminal/OS
+                                     language.                          [string]
   -z, --websiteTag                   Tag to identify the website in telemetry.
                                      Overrides OOBEE_TAGGED_WEBSITE env var.
-                                                                       [string]
+                                                                        [string]
 
 Examples:
-  To scan sitemap of website:', 'npm run cli -- -c [ 1 | sitemap ] -u <url_lin
-  k> [ -d <device> | -w <viewport_width> ]
-  To scan a website', 'npm run cli -- -c [ 2 | website ] -u <url_link> [ -d <d
-  evice> | -w <viewport_width> ]
-  To start a custom flow scan', 'npm run cli -- -c [ 3 | custom ] -u <url_link
-  > [ -d <device> | -w <viewport_width> ]
-
+  To scan sitemap of website:
+    npm run cli -- -c [ 1 | sitemap ] -u <url_link> \
+      [ -d <device> | -w <viewport_width> ]
+  To scan a website:
+    npm run cli -- -c [ 2 | website ] -u <url_link> \
+      [ -d <device> | -w <viewport_width> ]
+  To start a custom flow scan:
+    npm run cli -- -c [ 3 | custom ] -u <url_link> \
+      [ -d <device> | -w <viewport_width> ]
 ```
+<!-- cli-help:end -->
+
+#### CLI language
+
+`npm run cli -- --help` and the CLI's validation messages are shown in English or Japanese. The language is chosen in this order:
+
+1. `-n, --lang` (for example `--lang ja` or `--lang en`).
+2. The `OOBEE_LANG` environment variable.
+3. The terminal locale: `LC_ALL`, `LC_MESSAGES`, `LANG`, then `LANGUAGE` (macOS and Linux shells, and Git Bash/WSL on Windows). `C` and `POSIX` count as unset.
+4. The OS locale. On Windows this is **Settings → Time & language → Language & region → Regional format** (for example "日本語 (日本)"); the Windows display language is not used. On macOS it is the system language/region when `LANG` is not set.
+
+Any other language falls back to English. `-n`/`OOBEE_LANG` also set the language of the report (HTML, PDF, CSV/JSON and axe-core issue text). The report language is **not** detected from the terminal, so existing CI pipelines keep producing English reports unless you pass `--lang ja` or set `OOBEE_LANG=ja`.
+
+| Platform | Japanese help and messages | Japanese report |
+| --- | --- | --- |
+| macOS / Linux | `export LANG=ja_JP.UTF-8` (or a Japanese system language when `LANG` is unset) | add `--lang ja` or `export OOBEE_LANG=ja` |
+| Windows (PowerShell / cmd) | Regional format 日本語 (日本), or `$env:OOBEE_LANG="ja"` | add `--lang ja` or `$env:OOBEE_LANG="ja"` |
+
 
 ### Basic Auth
 
@@ -648,7 +689,7 @@ const URL_NO_COMMAS_REGEX = RegExp('https?://(www\\.)?[\\p{L}0-9][-\\p{L}0-9@:%.
 SyntaxError: Invalid regular expression: /https?://(www\.)?[\p{L}0-9][-\p{L}0-9@:%\._\+~#=]{0,254}[\p{L}0-9]\.[a-z]{2,63}(:\d{1,5})?(/[-\p{L}0-9@:%_\+.~#?&//=\(\)]*)?/: Invalid escape
 ```
 
-**Solution**: Install Node.js versions >= 20, i.e. Node.js v20 and above.
+**Solution**: Install Node.js 22.15 or above (Node 22 LTS or 24 LTS).
 
 ### Compiled against a different Node.js version
 
@@ -673,8 +714,8 @@ the module (for instance, using `npm rebuild` or `npm install`).
 **Issue**: Oobee does not start a scan as shown below
 
 ```shell
-> @govtechsg/oobee@0.10.68 cli
-> node --max-old-space-size=10000 dist/cli.js -c -u https://example.com
+> @govtechsg/oobee@0.11.23 cli
+> node --use-system-ca --max-old-space-size=10000 dist/cli.js -c -u https://example.com
 ```
 
 **Solutions**:
@@ -698,7 +739,7 @@ $env:OOBEE_VERBOSE=1
 {"timestamp":"2025-09-26 11:13:57","level":"info","message":"Logger writing to: /Users/.../Oobee/...txt"}
 ```
 
-5. Open an [https://github.com/GovTechSG/oobee/issues](issue). Describe the steps to the problem and paste a copy of the error log.
+5. Open an [issue](https://github.com/GovTechSG/oobee/issues). Describe the steps to the problem and paste a copy of the error log.
 
 
 ### Element Screenshot Limitation
@@ -734,3 +775,12 @@ It uses the existing report *.json files for the embedded HTML dataset.
 ```
 npx tsx dev/runGenerateJustHtmlReport.ts results/<report directory>
 ```
+
+### Update the CLI help in the READMEs
+The CLI help blocks in `README.md` (English) and `README.ja.md` (Japanese) are generated from the built CLI. After changing CLI options or `src/i18n/locales/*/cli.json`, regenerate them:
+
+```
+npm run build && node scripts/updateReadmeCliHelp.mjs
+```
+
+`node scripts/updateReadmeCliHelp.mjs --check` exits with an error if either block is out of date.

@@ -1,5 +1,7 @@
 ## Integrating Oobee with end-to-end testing frameworks
 
+**English** | [日本語](./INTEGRATION.ja.md)
+
 Oobee provides functionalities that makes it possible to be integrated with end-to-end testing frameworks such as [Cypress](https://www.cypress.io/) and [Playwright](https://playwright.dev/).
 
 ### Prerequisites
@@ -24,20 +26,20 @@ In order to use this functionality, the testing framework must support:
 
 3. Create an instance of Oobee with:
 
-   `const oobeeA11y = await oobeeA11yInit(entryUrl)`
+   `const oobeeA11y = await oobeeA11yInit({ entryUrl, testLabel, name, email })`
 
    `entryUrl` should be a valid URL referring to the domain of the website to be scanned with Oobee.
 
 ### API Reference
 
-#### `async oobeeA11yInit({entryUrl, testLabel, name, email, includeScreenshots, viewportSettings, thresholds, scanAboutMetadata, zip, deviceChosen, strategy, ruleset, specifiedMaxConcurrency, followRobots})`
+#### `async oobeeA11yInit({entryUrl, testLabel, name, email, includeScreenshots, viewportSettings, thresholds, scanAboutMetadata, zip, deviceChosen, strategy, ruleset, specifiedMaxConcurrency, followRobots, htmlMaxBytes, parentHtmlDepth, parentHtmlMaxBytes, lang})`
 
 Returns an instance of Oobee
 
 ##### Parameters
 
 - `entryUrl`
-  - Initial URL to start the oobee oobee scan
+  - Initial URL to start the Oobee scan
 - `testLabel`
   - Label for test in report
 - `name`
@@ -47,23 +49,31 @@ Returns an instance of Oobee
 - `includeScreenshots` (optional)
   - Include screenshots of affected elements in the report. Defaults to false.
 - `viewportSettings` (optional)
-  - Viewport settings used in cypress tests needed to optimize screenshot function. Defaults to cypress’ default viewport settings. Example: `{ width: 1000, height: 600 }`
+  - Viewport settings used in cypress tests needed to optimize screenshot function. Defaults to cypress’ default viewport settings. Example: `{ width: 1000, height: 660 }`
 - `thresholds` (optional)
   - Object containing the max number of mustFix or goodToFix issue occurrences before an error is thrown for test failure. Does not fail tests by default. Example: `{ mustFix: 1, goodToFix: 3 }`
 - `scanAboutMetadata` (optional)
   - Include additional information in the Scan About section of the report by passing in a JSON object.
 - `zip` (optional)
-  - Name of the generated zip of Oobee results at the end of scan. Defaults to "oobee-scan-results.zip".
+  - Name of the generated zip of Oobee results at the end of scan. Defaults to "oobee-scan-results".
 - `deviceChosen` (optional)
   - Name of the device to scan on. Example: `iPhone 13 Pro Max`
 - `strategy` (optional)
-  - The EnqueueStrategy to use. Options: `all`, `same-hostname`, `same-domain`, `same-origin`
+  - The EnqueueStrategy to use. Options: `all`, `same-hostname`, `same-domain`, `same-origin`. Defaults to `all`.
 - `ruleset` (optional)
-  - The array of rulesets to use. Options: `default`, `disable-oobee`, `enable-wcag-aaa`
+  - The array of rulesets to use. Options: `default`, `disable-oobee`, `enable-wcag-aaa`. Defaults to `['default']`.
 - `specifiedMaxConcurrency` (optional)
-  - The maximum number of concurrent requests to be made. Defaults to 3 × available CPUs (min 2, max 25).
+  - Shown in the report's scan settings; a value of `1` is reported as slow scan mode. Defaults to 25.
 - `followRobots` (optional)
   - Whether to follow robots.txt. Defaults to false.
+- `htmlMaxBytes` (optional)
+  - Maximum size in bytes of each element's HTML snippet stored in the report. Sets `OOBEE_HTML_MAX_BYTES`. Defaults to 1024. `0` keeps the full HTML.
+- `parentHtmlDepth` (optional)
+  - Number of ancestor levels of HTML to capture around each affected element (for context). Sets `OOBEE_PARENT_HTML_DEPTH`. Defaults to 0 (off).
+- `parentHtmlMaxBytes` (optional)
+  - Maximum size in bytes of the captured ancestor HTML. Sets `OOBEE_PARENT_HTML_MAX_BYTES`. Defaults to `htmlMaxBytes`.
+- `lang` (optional)
+  - ISO 639-1 language for the report and axe-core issue text: `en` or `ja`. Defaults to `OOBEE_LANG`, otherwise `en`.
 
 #### Oobee Instance
 
@@ -122,6 +132,10 @@ Returns:
 
 - Object containing the number of mustFix and goodToFix issue occurrences for this scan run e.g. `{ mustFix: 1, goodToFix: 5 }`
 
+`gradeReadability(sentences)`
+
+Grades the readability of text extracted from the page (for example with `extractText()` from `@govtechsg/oobee/dist/crawlers/custom/extractText.js`). Returns a readability score as a string, or an empty string if the text is readable or no sentences were provided. Pass the result to `runA11yScan()` as `gradingReadabilityFlag`.
+
 `testThresholds()`
 
 Checks the accumulated issue occurrences count against the specified threshold.
@@ -138,7 +152,7 @@ Example usages for Cypress and Playwright can be found in [this section](#exampl
 
 With reference to an instance of Oobee as `oobeeA11y`:
 
-1. Fetch the necessary scripts needed to be injected to document to be scanned by executing `oobeeA11y.getScripts()`. The scripts will be returned as a string.
+1. Fetch the necessary scripts needed to be injected to document to be scanned by executing `oobeeA11y.getAxeScript()` and then `oobeeA11y.getOobeeFunctions()`. Each returns the script as a string.
 2. Inject the scripts into the document to be scanned. The easiest way that this can be done is by using `eval()` in the document's environment.
    - Note that this step needs to be done for every page visited.
 3. Run a scan by executing `runA11yScan()` in the document's environment.
@@ -446,6 +460,7 @@ Scans one or more Playwright Page objects. This injects the Oobee engine into th
   - `pageTitle`: Optional override for page title (only applied if scanning a single page)
   - `metadata`: Optional metadata string
   - `ruleset`: Optional array of `RuleFlags` (e.g. `['enable-wcag-aaa', 'disable-oobee']`)
+  - `lang`: Optional ISO 639-1 language for issue text (`en` or `ja`). Defaults to `OOBEE_LANG`, otherwise `en`.
 
 **Returns:**
 
@@ -465,7 +480,38 @@ Scans raw HTML string(s). Note that this runs in a JSDOM environment (NodeJS) us
   - `pageTitle`: Optional title identifier (defaults to 'HTML Content')
   - `metadata`: Optional metadata string
   - `ruleset`: Optional array of `RuleFlags`
+  - `lang`: Optional ISO 639-1 language for issue text (`en` or `ja`). Defaults to `OOBEE_LANG`, otherwise `en`.
+
+Each HTML string is limited to `OOBEE_SCANHTML_MAX_BYTES` (default 50 MB) and each axe run to `OOBEE_SCANHTML_AXE_TIMEOUT_MS` (default 5 minutes). `0` or negative values fall back to these defaults rather than disabling the limit.
 
 **Returns:**
 
-- Scan results object containing categorized violations (mustFix, goodToFux, needsReview).
+- Scan results object containing categorized violations (mustFix, goodToFix, needsReview).
+
+##### `scanCustomFlow(config)`
+
+Starts an interactive custom flow scan: Oobee opens a browser at `config.url`, the user navigates and clicks **Scan this page** on each page, and the report is generated when the browser is closed or `stop()` is called. Returns a session object immediately (the function itself is not `async`).
+
+**Parameters (`config`):**
+
+- `url`: Entry URL (required). `http:`, `https:` and local `file:` URLs are accepted.
+- `name`, `email`: For Oobee data collection purposes (required)
+- `browser`: `chrome` (default), `chromium` or `edge`
+- `deviceChosen` / `customDevice` / `viewportWidth`: Viewport options. Defaults to `Desktop` at 1920px.
+- `includeScreenshots`: Include element screenshots. Defaults to false.
+- `customFlowLabel`: Label shown in the report and used in the results folder name.
+- `ruleset`, `strategy`, `followRobots`, `blacklistedPatterns`, `extraHTTPHeaders`, `zip`, `metadata`: Same meaning as for `oobeeA11yInit` and the CLI.
+- `maxPagesToScan`: Optional cap on the number of pages scanned.
+- `cleanupArtifacts`: Remove intermediate files after the report is generated. Defaults to true.
+- `onReady`, `onFinalizing`: Optional callbacks when the browser is ready and when the report is being generated.
+
+The report language follows `OOBEE_LANG` (`en` or `ja`); `scanCustomFlow` has no `lang` option. Only one custom flow session can run per process at a time.
+
+**Returns** a session with:
+
+- `ready`: Promise that resolves when the browser is open.
+- `result`: Promise that resolves with `{ customFlowLabel, scanData, scanItems, results, resultDirectory, artifacts }` once the report is generated.
+- `stop()`: End the scan and generate the report.
+- `focus()`: Bring the scan browser window to the front.
+
+> **Security:** if your application forwards URLs from untrusted users to `scanCustomFlow`, set `OOBEE_SSRF_PROTECTION=1`. Without it, those users can make the scanner load internal hosts or local files and receive their content in the report.

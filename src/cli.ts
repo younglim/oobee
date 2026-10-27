@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import _yargs from 'yargs';
+import { createRequire } from 'module';
+import type _yargsType from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import printMessage from 'print-message';
 import { devices } from 'playwright';
@@ -30,95 +31,83 @@ import combineRun from './combine.js';
 import { Answers } from './index.js';
 import { consoleLogger } from './logs.js';
 import { getLanguage, setLanguage } from './i18n/index.js';
+import {
+  initCliLanguage,
+  tc,
+  getLocalizedCliOptions,
+  getCliUsage,
+  getCliExamplesEpilogue,
+  getYargsLocale,
+} from './i18n/cli.js';
 
 const appVersion = getVersion();
-const yargs = _yargs(hideBin(process.argv));
+const rawArgv = hideBin(process.argv);
+// CLI text (help, validation messages) follows --lang / OOBEE_LANG, else the
+// terminal/OS language. Decided before yargs builds the help text.
+initCliLanguage(rawArgv);
+// Use yargs' CommonJS build: its platform shim measures text with
+// string-width, so Japanese (double-width) help wraps to the terminal width
+// and English lines wrap at word boundaries. The ESM shim counts code points,
+// which overflows Japanese lines and splits English words mid-token.
+const _yargs = createRequire(import.meta.url)('yargs') as typeof _yargsType;
+const yargs = _yargs(rawArgv);
 
 const options = yargs
   .version(false)
-  .usage(
-    `Oobee version: ${appVersion}
-Usage: npm run cli -- -c <crawler> -d <device> -w <viewport> -u <url> OPTIONS`,
-  )
+  .locale(getYargsLocale())
+  .detectLocale(false)
+  .usage(getCliUsage(appVersion))
   .strictOptions(true)
-  .options(cliOptions)
-  .example([
-    [
-      `To scan sitemap of website:', 'npm run cli -- -c [ 1 | sitemap ] -u <url_link> [ -d <device> | -w <viewport_width> ]`,
-    ],
-    [
-      `To scan a website', 'npm run cli -- -c [ 2 | website ] -u <url_link> [ -d <device> | -w <viewport_width> ]`,
-    ],
-    [
-      `To start a custom flow scan', 'npm run cli -- -c [ 3 | custom ] -u <url_link> [ -d <device> | -w <viewport_width> ]`,
-    ],
-  ])
+  .options(getLocalizedCliOptions())
+  .epilogue(getCliExamplesEpilogue())
   .coerce('d', option => {
     const device = devices[option];
     if (!device && option !== 'Desktop' && option !== 'Mobile') {
-      printMessage(
-        [`Invalid device. Please provide an existing device to start the scan.`],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidDevice')], messageOptions);
       cleanUpAndExit(1);
     }
     return option;
   })
   .coerce('w', option => {
     if (!option || Number.isNaN(option)) {
-      printMessage([`Invalid viewport width. Please provide a number. `], messageOptions);
+      printMessage([tc('messages.invalidViewportNumber')], messageOptions);
       cleanUpAndExit(1);
     } else if (option < 320 || option > 1080) {
-      printMessage(
-        ['Invalid viewport width! Please provide a viewport width between 320-1080 pixels.'],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidViewportRange')], messageOptions);
       cleanUpAndExit(1);
     }
     return option;
   })
   .coerce('p', option => {
     if (!Number.isInteger(option) || Number(option) <= 0) {
-      printMessage(
-        [`Invalid maximum number of pages. Please provide a positive integer.`],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidMaxPages')], messageOptions);
       cleanUpAndExit(1);
     }
     return option;
   })
   .coerce('t', option => {
     if (!Number.isInteger(option) || Number(option) <= 0) {
-      printMessage(
-        [`Invalid number for max concurrency. Please provide a positive integer.`],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidConcurrency')], messageOptions);
       cleanUpAndExit(1);
     }
     return option;
   })
   .coerce('k', nameEmail => {
     if (nameEmail.indexOf(':') === -1) {
-      printMessage(
-        [`Invalid format. Please provide your name and email address separated by ":"`],
-        messageOptions,
-      );
+      printMessage([tc('messages.nameEmailFormat')], messageOptions);
       cleanUpAndExit(1);
     }
     const [name, email] = nameEmail.split(':');
     if (name === '' || name === undefined || name === null) {
-      printMessage([`Please provide your name.`], messageOptions);
+      printMessage([tc('messages.nameRequired')], messageOptions);
       cleanUpAndExit(1);
     }
     if (!validName(name)) {
-      printMessage([`Invalid name. Please provide a valid name.`], messageOptions);
+      printMessage([tc('messages.invalidName')], messageOptions);
       cleanUpAndExit(1);
     }
     if (!validEmail(email)) {
-      printMessage(
-        [`Invalid email address. Please provide a valid email address.`],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidEmail')], messageOptions);
       cleanUpAndExit(1);
     }
     return nameEmail;
@@ -126,7 +115,7 @@ Usage: npm run cli -- -c <crawler> -d <device> -w <viewport> -u <url> OPTIONS`,
   .coerce('e', option => {
     const validationErrors = validateDirPath(option);
     if (validationErrors) {
-      printMessage([`Invalid exportDirectory directory path. ${validationErrors}`], messageOptions);
+      printMessage([tc('messages.invalidExportDir', { errors: validationErrors })], messageOptions);
       cleanUpAndExit(1);
     }
     return option;
@@ -138,17 +127,14 @@ Usage: npm run cli -- -c <crawler> -d <device> -w <viewport> -u <url> OPTIONS`,
     try {
       return validateFilePath(option, dirname);
     } catch (err) {
-      printMessage([`Invalid blacklistedPatternsFilename file path. ${err}`], messageOptions);
+      printMessage([tc('messages.invalidBlacklist', { error: String(err) })], messageOptions);
       cleanUpAndExit(1);
     }
   })
   .coerce('i', option => {
     const { choices } = cliOptions.i;
     if (!choices.includes(option)) {
-      printMessage(
-        [`Invalid value for fileTypes. Please provide valid keywords: ${choices.join(', ')}.`],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidFileTypes', { choices: choices.join(', ') })], messageOptions);
       cleanUpAndExit(1);
     }
     return option;
@@ -164,10 +150,7 @@ Usage: npm run cli -- -c <crawler> -d <device> -w <viewport> -u <url> OPTIONS`,
   .coerce('a', option => {
     const { choices } = cliOptions.a;
     if (!choices.includes(option)) {
-      printMessage(
-        [`Invalid value for additional. Please provide valid keywords: ${choices.join(', ')}.`],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidAdditional', { choices: choices.join(', ') })], messageOptions);
       cleanUpAndExit(1);
     }
     return option;
@@ -186,9 +169,7 @@ Usage: npm run cli -- -c <crawler> -d <device> -w <viewport> -u <url> OPTIONS`,
   })
   .check(argvs => {
     if (argvs.scanner === ScannerTypes.CUSTOM && argvs.maxpages) {
-      throw new Error(
-        '-p or --maxpages is only available in website, sitemap and local file scans.',
-      );
+      throw new Error(tc('messages.maxPagesNotCustom'));
     }
     return true;
   })
@@ -196,30 +177,27 @@ Usage: npm run cli -- -c <crawler> -d <device> -w <viewport> -u <url> OPTIONS`,
     const scanner = String(argvs.scanner ?? '');
 
     if (argvs.strategy && scanner !== ScannerTypes.WEBSITE && scanner !== ScannerTypes.CUSTOM && scanner !== ScannerTypes.INTELLIGENT && scanner !== ScannerTypes.SITEMAP && scanner !== ScannerTypes.LOCALFILE) {
-      throw new Error('-s or --strategy is only available in website, custom flow, intelligent, sitemap, and local file scans.');
+      throw new Error(tc('messages.strategyScanTypes'));
     }
     if (argvs.strategy === 'ignore' && scanner !== ScannerTypes.SITEMAP) {
-      throw new Error('-s ignore is only available for sitemap scans.');
+      throw new Error(tc('messages.strategyIgnoreSitemapOnly'));
     }
     return true;
   })
   .coerce('l', option => {
     const duration = Number(option);
     if (isNaN(duration) || duration < 0) {
-      printMessage(
-        ['Invalid scan duration. Please provide a positive number of seconds.'],
-        messageOptions,
-      );
+      printMessage([tc('messages.invalidScanDuration')], messageOptions);
       cleanUpAndExit(1);
     }
     return duration;
   })
   .check(argvs => {
     if (argvs.scanner !== ScannerTypes.WEBSITE && argvs.scanner !== ScannerTypes.CUSTOM && argvs.scanner !== ScannerTypes.INTELLIGENT && argvs.scanner !== ScannerTypes.SITEMAP && argvs.scanner !== ScannerTypes.LOCALFILE && argvs.strategy) {
-      throw new Error('-s or --strategy is only available in website, custom flow, intelligent, sitemap, and local file scans.');
+      throw new Error(tc('messages.strategyScanTypes'));
     }
     if (argvs.strategy === 'ignore' && argvs.scanner !== ScannerTypes.SITEMAP) {
-      throw new Error('-s ignore is only available for sitemap scans.');
+      throw new Error(tc('messages.strategyIgnoreSitemapOnly'));
     }
     return true;
   })

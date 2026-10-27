@@ -3,6 +3,7 @@ import printMessage from 'print-message';
 import { BrowserTypes, RuleFlags, ScannerTypes } from './constants.js';
 import { cleanUpAndExit, isTelemetryDisabled } from '../utils.js';
 import { SUPPORTED_LANGUAGES, isSupportedLanguage, normalizeLanguage } from '../i18n/index.js';
+import { tc } from '../i18n/cliText.js';
 
 export const messageOptions = {
   border: false,
@@ -50,8 +51,8 @@ export const cliOptions: { [key: string]: Options } = {
         default:
           printMessage(
             [
-              `Invalid option: ${resolvedOption}`,
-              `Please enter an integer (1 to ${choices.length}) or keywords (${choices.join(', ')}).`,
+              tc('messages.invalidOption', { option: String(resolvedOption) }),
+              tc('messages.enterIntegerOrKeyword', { count: choices.length, choices: choices.join(', ') }),
             ],
             messageOptions,
           );
@@ -107,7 +108,7 @@ export const cliOptions: { [key: string]: Options } = {
       if (value.toLowerCase() === 'no') {
         return false;
       }
-      throw new Error(`Invalid value "${value}" for -f, --safeMode. Use "yes" or "no".`);
+      throw new Error(tc('messages.invalidYesNo', { value, flag: '-f, --safeMode' }));
     },
   },
   h: {
@@ -124,12 +125,12 @@ export const cliOptions: { [key: string]: Options } = {
       if (value.toLowerCase() === 'no') {
         return false;
       }
-      throw new Error(`Invalid value "${value}" for -h, --headless. Use "yes" or "no".`);
+      throw new Error(tc('messages.invalidYesNo', { value, flag: '-h, --headless' }));
     },
   },
   b: {
     alias: 'browserToRun',
-    describe: 'Browser to run the scan on: 1) Chromium, 2) Chrome, 3) Edge. Defaults to Chromium.',
+    describe: 'Browser to run the scan on: 1) Chromium, 2) Chrome, 3) Edge. Defaults to Chrome on Windows and macOS (and on Linux when Chrome is installed), otherwise the bundled Chromium.',
     requiresArg: true,
     coerce: option => {
       const choices = ['chromium', 'chrome', 'edge'];
@@ -155,8 +156,8 @@ export const cliOptions: { [key: string]: Options } = {
         default:
           printMessage(
             [
-              `Invalid option: ${resolvedOption}`,
-              `Please enter an integer (1 to ${choices.length}) or keywords (${choices.join(', ')}).`,
+              tc('messages.invalidOption', { option: String(resolvedOption) }),
+              tc('messages.enterIntegerOrKeyword', { count: choices.length, choices: choices.join(', ') }),
             ],
             messageOptions,
           );
@@ -251,7 +252,7 @@ export const cliOptions: { [key: string]: Options } = {
       if (value.toLowerCase() === 'no') {
         return false;
       }
-      throw new Error(`Invalid value "${value}" for -r, --followRobots. Use "yes" or "no".`);
+      throw new Error(tc('messages.invalidYesNo', { value, flag: '-r, --followRobots' }));
     },
   },
   m: {
@@ -279,9 +280,10 @@ export const cliOptions: { [key: string]: Options } = {
       if (invalidUserChoices.length > 0) {
         printMessage(
           [
-            `Invalid values ${invalidUserChoices.join(',')} for -y, --ruleset. Please provide valid values: ${validChoices.join(
-              ', ',
-            )}.`,
+            tc('messages.invalidRuleset', {
+              values: invalidUserChoices.join(','),
+              choices: validChoices.join(', '),
+            }),
           ],
           messageOptions,
         );
@@ -290,7 +292,9 @@ export const cliOptions: { [key: string]: Options } = {
       if (userChoices.length > 1 && userChoices.includes('default')) {
         printMessage(
           [
-            `default and ${userChoices.filter(choice => choice !== 'default').join(',')} are mutually exclusive`,
+            tc('messages.rulesetExclusive', {
+              others: userChoices.filter(choice => choice !== 'default').join(','),
+            }),
           ],
           messageOptions,
         );
@@ -331,7 +335,7 @@ To obtain the JSON files, you need to base64-decode the file followed by gunzip.
       if (validNo.includes(value.toLowerCase())) {
         return false;
       }
-      throw new Error(`Invalid value "${value}" for --generate. Use "yes", "y", "no", or "n".`);
+      throw new Error(tc('messages.invalidYesNoShort', { value, flag: '--generate' }));
     },
   },
   l: {
@@ -346,14 +350,16 @@ To obtain the JSON files, you need to base64-decode the file followed by gunzip.
   n: {
     alias: 'lang',
     describe:
-      'ISO 639-1 language code for the report and axe-core issue text (e.g. en, ja). Defaults to OOBEE_LANG env var, or en.',
+      'ISO 639-1 language code for the report and axe-core issue text (e.g. en, ja). Defaults to OOBEE_LANG env var, or en. Also sets the language of this help and CLI messages, which otherwise follow the terminal/OS language.',
     type: 'string',
     requiresArg: true,
     demandOption: false,
     coerce: (val: string) => {
       const code = String(val).trim().toLowerCase();
       if (!isSupportedLanguage(code)) {
-        throw new Error(`Unsupported language "${val}". Supported: ${SUPPORTED_LANGUAGES.join(', ')}.`);
+        throw new Error(
+          tc('messages.unsupportedLanguage', { value: String(val), supported: SUPPORTED_LANGUAGES.join(', ') }),
+        );
       }
       return normalizeLanguage(code);
     },

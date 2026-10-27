@@ -144,7 +144,7 @@ The `constants` default export object holds runtime state:
 | `OOBEE_TAGGED_WEBSITE` | Tag to identify the website in Sentry telemetry (overridden by `--websiteTag` CLI flag) |
 | `OOBEE_SCAN_METADATA` | Overrides `entryUrl` tag in Sentry events |
 | `OOBEE_SCAN_PRODUCT` | Adds `scanProduct` tag to Sentry events |
-| `OOBEE_LANG` | ISO 639-1 language (`en`, `ja`) for the HTML report, summary PDF, JSON/CSV and axe-core issue text. The `-n, --lang` CLI flag and the library `lang` option take precedence. Default `en`. See "Report Localisation (i18n)". |
+| `OOBEE_LANG` | ISO 639-1 language (`en`, `ja`) for the HTML report, summary PDF, JSON/CSV and axe-core issue text, and for the CLI help/messages. The `-n, --lang` CLI flag and the library `lang` option take precedence. Default `en` for the report; when unset, the CLI help follows the terminal/OS language. See "Report Localisation (i18n)". |
 | `OOBEE_INSPECT_PRESET_SCAN` | `1`/`true`/`yes`/`on` = render the WOGAA Inspect preset rescan report design, including the combined Oobee/Inspect logo, rescan subtitle, viewport summary, and inspect-data text in the WCAG score card. |
 | `OOBEE_REPORT_PAGE_TITLE` / `OOBEE_REPORT_PAGE_URL` | Optional display overrides for report-level `siteName` and `urlScanned` metadata in generated report artifacts. Per-page crawled URLs/titles remain unchanged. |
 | `OOBEE_CONSECUTIVE_MAX_RETRIES` | Max consecutive HTTP failures before circuit breaker aborts crawl. `0` disables this check (default `0`) |
@@ -487,6 +487,22 @@ When `CF_WORKER_PROXY` is set, `proxyService.getProxyInfo()` starts a local SOCK
 - `npm run copyfiles` copies `src/i18n/locales` to `dist/i18n/locales`. A stale `dist/` serves old translations.
 - Report EJS partials read translated strings; the same cross-partial scope rules apply (Common Pitfalls 13 and 14). Render a `-n ja` report and an English report and compile their inline scripts in one shared scope.
 - Tests: `tests/i18n.test.mjs` (part of `npm run test:unit`, runs against `dist/`) checks key and `{{placeholder}}` parity between `en` and `ja` bundles, that every rule/WCAG text is translated, and that English output is unchanged. Add every new key to all locales.
+
+### CLI help and messages
+
+- The CLI's own text (yargs help, option descriptions, usage, examples, yargs built-in strings such as "Missing required argument", and the validation messages in `cli.ts` / `cliFunctions.ts`) is localised from `src/i18n/locales/<lang>/cli.json` via `tc()` in `src/i18n/cliText.ts`. `src/i18n/cli.ts` builds the localised yargs option table.
+- **The CLI language is auto-detected; the report language is not.** `initCliLanguage()` (called at the top of `cli.ts`, before yargs builds the help) uses, in order: `-n/--lang` (pre-scanned from argv), `OOBEE_LANG`, then `LC_ALL` / `LC_MESSAGES` / `LANG` / `LANGUAGE` (`C`/`POSIX` count as unset), then the OS locale from `Intl` (on Windows this is the *Regional format*, not the display language). See `src/i18n/detectLocale.ts`. The report language still comes only from `--lang` / `OOBEE_LANG` / the library `lang` option, so CI pipelines on Japanese machines keep producing English reports. Do not make `src/i18n/index.ts` read the terminal locale.
+- yargs is told the locale explicitly (`.locale(getYargsLocale()).detectLocale(false)`), so Windows (where `LANG` is normally unset) behaves like macOS/Linux.
+- `cli.ts` loads yargs' **CommonJS** build through `createRequire`. The ESM build's platform shim measures strings by code points, so Japanese (double-width) lines overflow the terminal and English lines split mid-word. `tests/cliHelp.test.mjs` fails if any help line is wider than 80 columns. Do not switch back to `import yargs from 'yargs'`.
+- English option descriptions must stay identical to `cliOptions[*].describe` in `cliFunctions.ts` (tested). When you change an option, update `cliFunctions.ts`, `en/cli.json` and `ja/cli.json` together.
+- Examples are rendered through `.epilogue()`, not `.example()`, so the commands stay on whole lines and can be copied.
+- The help blocks in `README.md` and `README.ja.md` (between `<!-- cli-help:start -->` / `<!-- cli-help:end -->`) are generated: run `npm run build && node scripts/updateReadmeCliHelp.mjs` after changing CLI text. `--check` exits non-zero if they are stale.
+- Tests: `tests/cliLocale.test.mjs` (detection priority, Windows/POSIX/`C` cases, argv pre-scan, report language not auto-detected) and `tests/cliHelp.test.mjs` (en/ja `cli.json` parity, English unchanged, rendered `--help` in both languages within 80 columns, localised yargs errors). Both are part of `npm run test:unit`.
+- The interactive `npm start` prompts (`src/constants/questions.ts`) are not localised yet.
+
+### Japanese docs
+
+- `README.ja.md` and `INTEGRATION.ja.md` translate `README.md` and `INTEGRATION.md`. Keep them structurally identical (same headings, code blocks, device list, env-var rows, error-code rows). When you change the English docs, update the Japanese files in the same commit. Each Japanese file states that the English version takes precedence.
 
 ## Report Output Structure
 
