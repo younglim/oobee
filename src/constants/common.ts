@@ -30,9 +30,10 @@ import constants, {
   BrowserTypes,
   FileTypes,
   getEnumKey,
+  isRunningInContainer,
 } from './constants.js';
 import { consoleLogger } from '../logs.js';
-import { isUrlPdf, splitAuthHeaders, addAuthRouteHandler } from '../crawlers/commonCrawlerFunc.js';
+import { isUrlPdf, splitAuthHeaders, addAuthRouteHandler, makeHeaderScopeMatcher } from '../crawlers/commonCrawlerFunc.js';
 import {
   cleanUpAndExit,
   isFollowStrategy,
@@ -44,6 +45,8 @@ import { Answers, Data } from '../index.js';
 import { DeviceDescriptor } from '../types/types.js';
 import { getProxyInfo, proxyInfoToResolution, ProxySettings } from '../proxyService.js';
 import { ensureAndInjectSafeBrowsing, getSafeBrowsingIgnoredArgs } from '../safeBrowsingProfile.js';
+import { waitForMainThreadIdleInPage } from '../crawlers/custom/waitForMainThreadIdleInPage.js';
+import { readSettledContent, settleClientRedirects } from '../settleNavigation.js';
 
 // validateDirPath validates a provided directory path
 // returns null if no error
@@ -376,6 +379,11 @@ export const checkUrlConnectivityWithBrowser = async (
 
   let browserContext;
   let browserInstance;
+  // Status of the last main-frame document response. Chrome can abort
+  // navigation with net::ERR_HTTP_RESPONSE_CODE_FAILURE (e.g. 4xx/5xx with an
+  // empty body), so page.goto() throws and never returns the Response.
+  let mainFrameStatus: number | undefined;
+
 
   const rawDevice = (playwrightDeviceDetailsObject || {}) as Record<string, unknown>;
   const {
@@ -475,33 +483,61 @@ export const checkUrlConnectivityWithBrowser = async (
       return res;
     });
 
-    // OPTIMIZATION: Wait for 'domcontentloaded' only
-    let response;
-    try {
-      response = await page.goto(url, {
-        timeout: 15000,
-        waitUntil: 'domcontentloaded',
-      });
-    } catch (navError) {
-      throw navError;
-    }
+    page.on('response', (r: any) => {
+      try {
+        if (r.request().isNavigationRequest() && r.frame() === page.mainFrame()) {
+          mainFrameStatus = r.status();
+        }
+      } catch {
+        // frame detached / page closed — ignore
+      }
+    });
+
+    // Follow client-side redirects (meta refresh, JS location changes, window.open)
+    // until the main frame stops navigating, instead of guessing with a fixed delay.
+    let entryResponse;
+    const settled = await settleClientRedirects(browserContext, page, async () => {
+      entryResponse = await page.goto(url, { timeout: 15000, waitUntil: 'domcontentloaded' });
+      return entryResponse;
+    });
+    const settledPage = settled.page;
+    const response = settled.finalResponse ?? entryResponse;
 
     if (!response) throw new Error('No response from navigation');
 
-    // Wait briefly for JS/meta-refresh redirects to settle before reading the final URL.
-    // Server-side redirects are already reflected after goto(), but client-side redirects
-    // (e.g. domain.tld -> www.domain.tld via JS or meta-refresh) need extra time.
-    try {
-      await Promise.race([
-        page.waitForURL(currentUrl => currentUrl !== url, { timeout: 5000 }),
-        new Promise(resolve => setTimeout(resolve, 1000)), // minimum settle time
-      ]);
-    } catch {
-      // No redirect happened within the window — that's fine, continue with current URL
+    const finalUrl = settledPage.url();
+    // A client redirect whose target failed leaves the page on chrome-error://;
+    // classify it like a failed goto() in the catch block below.
+    if (settled.failedNavigation && !/^https?:/i.test(finalUrl)) {
+      throw new Error(`Client-side redirect failed: ${settled.failedNavigation}`);
     }
 
-    // Re-read page.url() AFTER potential client-side redirects have resolved
-    const finalUrl = page.url();
+    // asgard-0001: the connectivity check follows server/JS/meta redirects and
+    // its final URL becomes the crawl seed. A public entry URL must not be able
+    // to redirect us onto an internal/loopback/metadata address, otherwise the
+    // seed (and crawlDomain's entryIsInternal flag) is silently flipped.
+    // Checks every redirect hop and the final URL; the connected address only
+    // when the connection was direct (behind FAMILY_DNS / CF Worker / proxy it
+    // is the proxy's address and would refuse every public site).
+    // Client-side hops never go through response.redirectedFrom(), so vet every
+    // requested main-frame URL (including failed ones) and every document response.
+    let refusedAt: string | null = null;
+    for (const hopUrl of settled.requestedUrls) {
+      if (await isRefusedRedirectTarget(url, hopUrl)) {
+        refusedAt = hopUrl;
+        break;
+      }
+    }
+    for (const hop of [...new Set([entryResponse, ...settled.responses, response].filter(Boolean))]) {
+      if (refusedAt) break;
+      refusedAt = await isRefusedNavigation(url, hop, hop === response ? finalUrl : undefined);
+    }
+    if (refusedAt) {
+      consoleLogger.info(`Connectivity check refused: ${url} reached internal address ${refusedAt}`);
+      res.status = constants.urlCheckStatuses.systemError.code;
+      return res;
+    }
+
     const finalStatus = response.status();
     const headers = response.headers();
     contentType = headers['content-type'] || '';
@@ -521,10 +557,14 @@ export const checkUrlConnectivityWithBrowser = async (
     } else if (finalStatus === 405 || finalStatus === 501) {
       // Some origins 405/501 but the browser-rendered page is still reachable after client redirects.
       // As a last resort, consider DOM presence as success if we actually have a document.
-      const hasDOM = await page.evaluate(() => !!document && !!document.documentElement);
+      const hasDOM = await settledPage.evaluate(() => !!document && !!document.documentElement);
       res.status = hasDOM
         ? constants.urlCheckStatuses.success.code
         : constants.urlCheckStatuses.systemError.code;
+    } else if (finalStatus >= 400) {
+      // The server answered with an error status (e.g. 403 from a WAF/CDN or
+      // IP allowlist). Report the actual code instead of a generic system error.
+      res.status = constants.urlCheckStatuses.errorStatusReceived.code;
     } else {
       res.status = constants.urlCheckStatuses.systemError.code;
     }
@@ -533,12 +573,7 @@ export const checkUrlConnectivityWithBrowser = async (
     if (contentType.includes('pdf') || contentType.includes('octet-stream')) {
       res.content = '%PDF-'; // avoid binary in memory / download
     } else {
-      try {
-        // Try to get a stable DOM; don't fail the check if it times out
-        // Note: Since we used 'domcontentloaded' in goto, this is fast, but kept for safety/stability
-        await page.waitForLoadState('domcontentloaded', { timeout: 5000 });
-      } catch {}
-      res.content = await page.content();
+      res.content = await readSettledContent(settledPage);
     }
   } catch (error) {
     if (error.message.includes('net::ERR_INVALID_AUTH_CREDENTIALS')) {
@@ -556,6 +591,18 @@ export const checkUrlConnectivityWithBrowser = async (
       error.message.includes('net::ERR_BLOCKED_BY_RESPONSE')
     ) {
       res.status = constants.urlCheckStatuses.blockedByClient.code;
+    } else if (
+      error.message.includes('net::ERR_HTTP_RESPONSE_CODE_FAILURE') &&
+      mainFrameStatus === 401
+    ) {
+      res.httpStatus = mainFrameStatus;
+      res.status = constants.urlCheckStatuses.unauthorised.code;
+    } else if (
+      error.message.includes('net::ERR_HTTP_RESPONSE_CODE_FAILURE') ||
+      (mainFrameStatus !== undefined && mainFrameStatus >= 400)
+    ) {
+      if (mainFrameStatus !== undefined) res.httpStatus = mainFrameStatus;
+      res.status = constants.urlCheckStatuses.errorStatusReceived.code;
     } else {
       consoleLogger.error(error);
       res.status = constants.urlCheckStatuses.systemError.code;
@@ -587,7 +634,18 @@ export const isSitemapContent = (content: string) => {
   }
 
   const regexForHtml = new RegExp('<(?:!doctype html|html|head|body)+?>', 'gmi');
-  const regexForXmlSitemap = new RegExp('<(?:urlset|sitemapindex|feed|rss)+?.*>', 'gmi');
+  // asgard-0010 (2026-10-12 re-scan): the previous pattern
+  // `<(?:urlset|sitemapindex|feed|rss)+?.*>` combines a lazy one-or-more
+  // group with a trailing `.*>` — on a long run of
+  // urlset/sitemapindex/feed/rss tokens with no closing `>`, the engine
+  // expands the group one repetition at a time and re-scans `.*` on every
+  // attempt, which is O(n^2) on attacker-sized malformed input (content here
+  // is unvalidated — validateXML already returned isValid=false by this
+  // point). Rewritten as a possessive-style check: match the literal open
+  // tag once (no repeated alternation group) and allow at most a bounded run
+  // of non-'>' characters before the closing bracket, so there is no
+  // backtracking group left to blow up regardless of input length.
+  const regexForXmlSitemap = new RegExp('<(?:urlset|sitemapindex|feed|rss)\\b[^>]{0,2000}>', 'gmi');
   if (content.match(regexForHtml) && content.match(regexForXmlSitemap)) {
     // is an XML sitemap wrapped in a HTML document
     return true;
@@ -845,6 +903,15 @@ export const getUrlsFromRobotsTxt = async (
   browserToRun: string,
   userDataDirectory: string,
   extraHTTPHeaders: Record<string, string>,
+  // asgard-0002 (2026-10-09 re-scan): the operator's full headers (including
+  // Authorization) used to be sent to whatever origin `url` resolves to. Under
+  // the default same-domain crawl strategy `url` is the page currently being
+  // scanned — which can be a sibling subdomain, not the operator's entry URL —
+  // so the credential was reaching hosts the operator never targeted directly.
+  // Pin header scoping to the operator's actual entry URL, defaulting to `url`
+  // itself for callers (prepareData, intelligent-sitemap) where the robots.txt
+  // IS for the entry URL's own origin.
+  entryUrl: string = url,
 ): Promise<void> => {
   if (!constants.robotsTxtUrls) return;
 
@@ -859,6 +926,7 @@ export const getUrlsFromRobotsTxt = async (
       browserToRun,
       userDataDirectory,
       extraHTTPHeaders,
+      entryUrl,
     );
     consoleLogger.info(`Fetched robots.txt from ${robotsUrl}`);
   } catch (e) {
@@ -939,10 +1007,38 @@ const getRobotsTxtViaPlaywright = async (
   browser: string,
   userDataDirectory: string,
   extraHTTPHeaders: Record<string, string>,
+  entryUrl: string,
 ): Promise<string> => {
   let robotsDataDir = '';
   let browserContext;
   let browserInstance;
+
+  // asgard-0002 (2026-10-09 re-scan): this fetch only ever navigates to
+  // `robotsUrl` itself (no subresources), so scoping can be computed once up
+  // front instead of via a per-request route handler. Authorization is only
+  // sent when robotsUrl is the exact entry origin (matches addAuthRouteHandler's
+  // same-origin rule elsewhere); other headers (Cookie, X-Api-Key, ...) are
+  // sent only when robotsUrl is within the entry URL's configured scope
+  // (site/origin/all, per OOBEE_SCOPE_HEADERS_TO_ORIGIN / OOBEE_UNSCOPED_OPERATOR_HEADERS).
+  const scopedHeaders = ((): Record<string, string> | undefined => {
+    if (!extraHTTPHeaders || Object.keys(extraHTTPHeaders).length === 0) return undefined;
+    const inScope = makeHeaderScopeMatcher(entryUrl);
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(extraHTTPHeaders)) {
+      if (k.toLowerCase() === 'authorization') {
+        let sameOrigin = false;
+        try {
+          sameOrigin = new URL(robotsUrl).origin === new URL(entryUrl).origin;
+        } catch {
+          sameOrigin = false;
+        }
+        if (sameOrigin) out[k] = v;
+      } else if (inScope(robotsUrl)) {
+        out[k] = v;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  })();
 
   // Bug in Chrome which causes browser pool crash when userDataDirectory is set in non-headless mode
   if (process.env.CRAWLEE_HEADLESS === '1') {
@@ -957,7 +1053,7 @@ const getRobotsTxtViaPlaywright = async (
     if (process.env.CRAWLEE_HEADLESS === '1') {
       browserContext = await launchPersistentSafeContext(robotsDataDir, {
         ...getPlaywrightLaunchOptions(browser),
-        ...(extraHTTPHeaders && { extraHTTPHeaders }),
+        ...(scopedHeaders && { extraHTTPHeaders: scopedHeaders }),
         ...(process.env.OOBEE_USER_AGENT && { userAgent: process.env.OOBEE_USER_AGENT }),
       });
       register(browserContext);
@@ -968,14 +1064,38 @@ const getRobotsTxtViaPlaywright = async (
       register(browserInstance as unknown as { close: () => Promise<void> });
 
       browserContext = await browserInstance.newContext({
-        ...(extraHTTPHeaders && { extraHTTPHeaders }),
+        ...(scopedHeaders && { extraHTTPHeaders: scopedHeaders }),
         ...(process.env.OOBEE_USER_AGENT && { userAgent: process.env.OOBEE_USER_AGENT }),
       });
     }
 
+
     const page = await browserContext.newPage();
 
-    await page.goto(robotsUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    // asgard-0007: robots.txt is fetched for whatever origin is being scanned,
+    // including intranet/localhost/Tailscale targets, so a blanket internal-IP
+    // refusal (asgard's patch) would silently drop robots rules for those scans.
+    // Instead: never touch metadata space, and refuse an internal server only
+    // when the robots origin itself is public — that is the redirect / DNS
+    // rebinding pivot. Throwing is safe: callers treat it as "no robots.txt".
+    if (await isLinkLocalOrMetadataUrl(robotsUrl)) {
+      throw new Error('Refusing robots.txt fetch targeting a link-local/metadata address');
+    }
+    const originIsInternal = await isInternalOrLoopbackUrl(robotsUrl);
+    const response = await page.goto(robotsUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    // Redirect hops + direct-connection address (proxy-safe; see isRefusedNavigation).
+    for (const hopUrl of getResponseHopUrls(response, page.url())) {
+      if (await isRefusedRedirectTarget(robotsUrl, hopUrl)) {
+        throw new Error(`Refusing robots.txt redirected to internal address ${hopUrl}`);
+      }
+    }
+    const remoteIp = await getDirectServerAddr(response);
+    if (remoteIp) {
+      const kind = classifyServerAddress(remoteIp);
+      if (kind === 'metadata' || (kind === 'internal' && !originIsInternal)) {
+        throw new Error(`Refusing robots.txt body served from internal address ${remoteIp}`);
+      }
+    }
     const robotsTxt: string | null = await page.evaluate(() => document.body.textContent);
     return robotsTxt;
   } catch (e) {
@@ -1000,7 +1120,7 @@ export const getSitemapsFromRobotsTxt = async (
 
   let robotsTxt: string;
   try {
-    robotsTxt = await getRobotsTxtViaPlaywright(robotsUrl, browser, userDataDirectory, extraHTTPHeaders);
+    robotsTxt = await getRobotsTxtViaPlaywright(robotsUrl, browser, userDataDirectory, extraHTTPHeaders, url);
   } catch (e) {
     consoleLogger.info(`Unable to fetch robots.txt from ${robotsUrl} for sitemap discovery`);
     return [];
@@ -1144,6 +1264,228 @@ const isInternalIpv6 = (addr: string): boolean => {
   return false;
 };
 
+// Narrower than isInternalOrLoopbackUrl: only link-local / cloud-metadata /
+// this-network space. Operator-chosen entry URLs (custom flow) legitimately
+// target localhost dev servers and intranet hosts, but nothing a user wants
+// an accessibility report for lives in these ranges, so they are refused on
+// every path regardless of OOBEE_ALLOW_INTERNAL_TARGETS / OOBEE_SSRF_PROTECTION.
+const METADATA_ADDR_RANGES: string[] = [
+  '169.254.0.0/16',
+  '192.0.0.0/24',
+  '0.0.0.0/8',
+  '100.100.100.200/32',
+];
+const isMetadataIpv4 = (ip: string): boolean => METADATA_ADDR_RANGES.some(r => ipv4InRange(ip, r));
+const isMetadataIpv6 = (addr: string): boolean => {
+  const g = ipv6ToGroups(addr.toLowerCase());
+  if (!g) return false;
+  if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0xffff) {
+    return isMetadataIpv4(`${g[6] >> 8}.${g[6] & 0xff}.${g[7] >> 8}.${g[7] & 0xff}`);
+  }
+  if ((g[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  // AWS IMDS IPv6 endpoint fd00:ec2::254
+  return g[0] === 0xfd00 && g[1] === 0x0ec2 && g.slice(2, 7).every(x => x === 0) && g[7] === 0x254;
+};
+
+// Classifies the IP the browser actually connected to (response.serverAddr()),
+// for DNS-rebinding checks where only an address — not a URL — is available.
+export const classifyServerAddress = (remoteIp: string): 'metadata' | 'internal' | 'public' => {
+  const bare = remoteIp.replace(/^\[|\]$/g, '').toLowerCase();
+  const v4 = isIpv4Literal(bare);
+  if (v4 ? isMetadataIpv4(bare) : isMetadataIpv6(bare)) return 'metadata';
+  if (v4 ? isInternalIpv4(bare) : isInternalIpv6(bare)) return 'internal';
+  return 'public';
+};
+
+export async function isLinkLocalOrMetadataUrl(candidate: string): Promise<boolean> {
+  let host: string;
+  try {
+    host = new URL(candidate).hostname;
+  } catch {
+    return false;
+  }
+  if (!host) return false;
+  const bare = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (isIpv4Literal(bare)) return isMetadataIpv4(bare);
+  if (bare.includes(':')) return isMetadataIpv6(bare);
+  try {
+    const { lookup } = await import('dns/promises');
+    const records = await lookup(bare, { all: true });
+    return records.some(r =>
+      r.family === 4 ? isMetadataIpv4(r.address) : isMetadataIpv6(r.address),
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Classifies a URL's host with ONE DNS lookup (isLinkLocalOrMetadataUrl +
+// isInternalOrLoopbackUrl did two). Same rules as those two:
+//  - non-http(s) URLs: 'skip' (not network egress);
+//  - localhost names: 'internal';
+//  - IP literals: classified directly, no DNS;
+//  - otherwise: any metadata answer -> 'metadata', any internal -> 'internal';
+//  - DNS failure: 'public' (page.goto surfaces the error), as before.
+export type UrlHostKind = 'skip' | 'metadata' | 'internal' | 'public';
+
+export async function classifyUrlHost(candidate: string): Promise<UrlHostKind> {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return 'skip';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return 'skip';
+  const lower = parsed.hostname.toLowerCase();
+  if (!lower) return 'skip';
+  if (lower === 'localhost' || lower.endsWith('.localhost')) return 'internal';
+  const bare = lower.replace(/^\[|\]$/g, '');
+  if (isIpv4Literal(bare)) {
+    if (isMetadataIpv4(bare)) return 'metadata';
+    return isInternalIpv4(bare) ? 'internal' : 'public';
+  }
+  if (bare.includes(':')) {
+    if (isMetadataIpv6(bare)) return 'metadata';
+    return isInternalIpv6(bare) ? 'internal' : 'public';
+  }
+  try {
+    const { lookup } = await import('dns/promises');
+    const records = await lookup(bare, { all: true });
+    let internal = false;
+    for (const r of records) {
+      const v4 = r.family === 4;
+      if (v4 ? isMetadataIpv4(r.address) : isMetadataIpv6(r.address)) return 'metadata';
+      if (v4 ? isInternalIpv4(r.address) : isInternalIpv6(r.address)) internal = true;
+    }
+    return internal ? 'internal' : 'public';
+  } catch {
+    return 'public';
+  }
+}
+
+// Per-page memo of classifyUrlHost, keyed by hostname. One page's
+// before-load check, redirect hops and final URL share a single lookup per
+// host. Create one per page/navigation only: reusing it across pages would
+// let a site rebind its DNS to an internal address after its first page.
+export const makeHostKindCache = () => {
+  const byHost = new Map<string, Promise<UrlHostKind>>();
+  return (target: string): Promise<UrlHostKind> => {
+    let key: string;
+    try {
+      const u = new URL(target);
+      key = `${u.protocol}//${u.hostname.toLowerCase()}`;
+    } catch {
+      return Promise.resolve('skip');
+    }
+    let p = byHost.get(key);
+    if (!p) {
+      p = classifyUrlHost(target);
+      byHost.set(key, p);
+    }
+    return p;
+  };
+};
+
+// Egress decision from a host kind, pinned to whether the entry is internal.
+export const isRefusedHostKind = (kind: UrlHostKind, entryIsInternal: boolean): boolean =>
+  kind === 'metadata' || (kind === 'internal' && !entryIsInternal);
+
+// asgard-0001: egress policy pinned to the operator-supplied entry URL.
+// Returns true when navigating from `entryUrl` to `target` (e.g. via a
+// redirect) would pivot into an address the operator did not choose:
+//  - link-local / cloud-metadata: always refused.
+//  - loopback / private ranges: refused unless the entry URL itself was
+//    internal (OOBEE_ALLOW_INTERNAL_TARGETS=1 still lifts the private part).
+// Non-http(s) targets (file:, about:, chrome-error:) are not network egress.
+export async function isRefusedRedirectTarget(entryUrl: string, target: string): Promise<boolean> {
+  let protocol: string;
+  try {
+    protocol = new URL(target).protocol;
+  } catch {
+    return false;
+  }
+  if (protocol !== 'http:' && protocol !== 'https:') return false;
+  const kind = await classifyUrlHost(target);
+  if (kind === 'metadata') return true;
+  if (kind !== 'internal') return false;
+  return !(await isInternalOrLoopbackUrl(entryUrl));
+}
+
+// Returns the IP the browser connected to, or null when it can't be trusted.
+// Behind a proxy (Crawlee's local proxy-chain, the FAMILY_DNS / CF Worker
+// SOCKS5 listener, HTTP_PROXY) Chromium reports the PROXY's address, e.g.
+// 127.0.0.1:8877, which made every public page look internal. A direct
+// connection reports the site's own port, so only trust the address when its
+// port matches the response URL's port; otherwise rely on the hop checks.
+export const getDirectServerAddr = async (
+  response: { serverAddr: () => Promise<{ ipAddress: string; port: number } | null>; url: () => string } | null | undefined,
+): Promise<string | null> => {
+  if (!response) return null;
+  const addr = await response.serverAddr().catch(() => null);
+  if (!addr?.ipAddress) return null;
+  let expectedPort: number;
+  try {
+    const u = new URL(response.url());
+    expectedPort = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
+  } catch {
+    return null;
+  }
+  return addr.port === expectedPort ? addr.ipAddress : null;
+};
+
+// Every URL a navigation touched: each redirect hop plus the final page URL.
+export const getResponseHopUrls = (
+  response: { request: () => { url: () => string; redirectedFrom: () => any } } | null | undefined,
+  finalUrl?: string,
+): string[] => {
+  const hops = new Set<string>();
+  let hop = response?.request();
+  while (hop) {
+    hops.add(hop.url());
+    hop = hop.redirectedFrom();
+  }
+  if (finalUrl) hops.add(finalUrl);
+  return [...hops];
+};
+
+// Proxy-safe replacement for "check the connected address": refuse if any
+// redirect hop or the final URL is refused for this entry (fresh DNS lookup
+// per hop, so a host rebound to an internal IP is caught), and also check the
+// connected address when the connection was direct.
+export async function isRefusedNavigation(
+  entryUrl: string,
+  response: any,
+  finalUrl?: string,
+): Promise<string | null> {
+  // One lookup per distinct host across all hops, and the entry is
+  // classified once (only needed if some hop is internal).
+  const kindOf = makeHostKindCache();
+  let entryInternal: boolean | undefined;
+  for (const hopUrl of getResponseHopUrls(response, finalUrl)) {
+    const kind = await kindOf(hopUrl);
+    if (kind === 'metadata') return hopUrl;
+    if (kind === 'internal') {
+      if (entryInternal === undefined) entryInternal = await isInternalOrLoopbackUrl(entryUrl);
+      if (!entryInternal) return hopUrl;
+    }
+  }
+  const ip = await getDirectServerAddr(response);
+  if (ip && (await isRefusedServerAddrForEntry(entryUrl, ip))) return ip;
+  return null;
+}
+
+// Same policy as isRefusedRedirectTarget, but for the IP actually connected
+// to (response.serverAddr()) — the DNS-rebinding backstop.
+export async function isRefusedServerAddrForEntry(
+  entryUrl: string,
+  remoteIp: string,
+): Promise<boolean> {
+  const kind = classifyServerAddress(remoteIp);
+  if (kind === 'metadata') return true;
+  if (kind === 'public') return false;
+  return !(await isInternalOrLoopbackUrl(entryUrl));
+}
+
 export async function isInternalOrLoopbackUrl(candidate: string): Promise<boolean> {
   let host: string;
   try {
@@ -1181,19 +1523,59 @@ export const getLinksFromSitemap = async (
   userUrlInput: string,
   isIntelligent: boolean,
   extraHTTPHeaders: Record<string, string>,
-  strategy: EnqueueStrategy = EnqueueStrategy.All,
-  userUrl: string = userUrlInput,
+  strategy: EnqueueStrategy = EnqueueStrategy.SameDomain,
+  userUrl: string = userUrlInput || sitemapUrl,
+  onRobotsDisallowed?: (url: string) => void,
 ) => {
   const scannedSitemaps = new Set<string>();
   const sitemapLinkCounts: Record<string, number> = {};
   const allUrls = new Set<string>(); // all discovered URLs (lightweight strings)
+  // asgard-0006 (2026-10-12 re-scan): _maxLinksCount (the crawl's
+  // maxRequestsPerCrawl) was accepted as a parameter but never read anywhere
+  // in this function — every <loc> found while walking a sitemap/sitemap-index,
+  // including recursive descent into child sitemaps, was pushed into allUrls
+  // with no size limit, so a hostile in-scope sitemap listing millions of URLs
+  // could exhaust memory before the crawler ever got a chance to apply its own
+  // maxRequestsPerCrawl (which only bounds successfully SCANNED pages, not
+  // discovery). Cap the discovery set here too. maxRequestsPerCrawl can
+  // legitimately be Infinity (operator asked for an unlimited scan), so apply
+  // a generous multiple of it as headroom for de-dup/strategy-filter slack
+  // when finite, and otherwise fall back to a fixed hard ceiling so discovery
+  // itself can never grow unbounded even when page-count is uncapped.
+  const SITEMAP_DISCOVERY_HARD_CEILING = 200_000;
+  const maxLinksToDiscover =
+    Number.isFinite(_maxLinksCount) && _maxLinksCount > 0
+      ? Math.min(Math.max(_maxLinksCount * 10, 1000), SITEMAP_DISCOVERY_HARD_CEILING)
+      : SITEMAP_DISCOVERY_HARD_CEILING;
+  let discoveryCapWarningLogged = false;
   const isImageSitemapUrl = (candidateUrl: string) =>
     /(^|\/)image-sitemap(?:-index)?(?:-\d+)?\.xml(?:$|[?#])/i.test(candidateUrl);
 
+  const entryIsRemote = !isFilePath(sitemapUrl);
+  // Sitemap scans keep every listed URL and child sitemap unless -s same-hostname
+  // is given for a remote sitemap. Intelligent scans always filter because their
+  // sitemaps are auto-discovered from the target site.
+  const isScopeFiltered =
+    isIntelligent || (entryIsRemote && strategy === EnqueueStrategy.SameHostname);
+  const isInSitemapScope = (candidateUrl: string) =>
+    !isScopeFiltered ||
+    !userUrl ||
+    isFilePath(userUrl) ||
+    isFollowStrategy(candidateUrl, userUrl, strategy);
+
   const addToUrlList = (url: string) => {
     if (!url) return;
+    if (allUrls.size >= maxLinksToDiscover) {
+      if (!discoveryCapWarningLogged) {
+        consoleLogger.warn(
+          `Sitemap discovery cap (${maxLinksToDiscover} URLs) reached; ignoring further discovered URLs.`,
+        );
+        discoveryCapWarningLogged = true;
+      }
+      return;
+    }
     if (isDisallowedInRobotsTxt(url)) return;
-    if (!isFilePath(userUrl) && !isFollowStrategy(url, userUrl, strategy)) return;
+    if (!isInSitemapScope(url)) return;
 
     url = convertPathToLocalFile(url);
     allUrls.add(url);
@@ -1256,8 +1638,15 @@ export const getLinksFromSitemap = async (
   };
 
   const processNonStandardSitemap = (data: string) => {
+    // Match a URL anywhere on a line (not just when the whole line is the
+    // URL). The previous regex anchored to the full line (^...$), so a URL
+    // embedded inside markup — e.g. `<url>https://example.com/a</url>` or
+    // `<link href='https://example.com/b' />` — never matched, since the
+    // line also contains the surrounding tag/attribute text. Stop at
+    // whitespace or common XML/HTML delimiters so the match doesn't swallow
+    // a trailing closing tag or quote.
     const urlsFromData = crawlee
-      .extractUrls({ string: data, urlRegExp: new RegExp('^(http|https):/{2}.+$', 'gmi') });
+      .extractUrls({ string: data, urlRegExp: new RegExp('(?:http|https)://[^\\s"\'<>]+', 'gi') });
     urlsFromData.forEach(url => {
       addToUrlList(url);
     });
@@ -1271,8 +1660,7 @@ export const getLinksFromSitemap = async (
   // If the initial sitemap is remote, do NOT let a hostile server redirect us
   // into the local filesystem via a `<loc>file:///…</loc>` child. Only remote
   // sitemaps may reference file:// / local paths when the operator explicitly
-  // started from a local sitemap file.
-  const entryIsRemote = !isFilePath(sitemapUrl);
+  // started from a local sitemap file (see entryIsRemote above).
 
   const fetchUrls = async (url: string, extraHTTPHeaders: Record<string, string>) => {
     let data;
@@ -1316,7 +1704,7 @@ export const getLinksFromSitemap = async (
       // discovered child sitemaps here so the entry request is covered too —
       // otherwise a hostile robots.txt could point the scanner's browser at
       // internal or link-local/cloud-metadata endpoints (blind SSRF).
-      if (userUrl && !isFollowStrategy(url, userUrl, strategy)) {
+      if (!isInSitemapScope(url)) {
         consoleLogger.info(`Skipping off-strategy sitemap: ${url}`);
         return;
       }
@@ -1374,10 +1762,21 @@ export const getLinksFromSitemap = async (
         // the remote address the browser actually connected to falls outside
         // link-local / loopback / RFC1918 ranges before trusting the body.
         if (response) {
+          // Redirect hops: the entry sitemap is only fetched when it is not
+          // internal, so any internal hop is a redirect pivot.
+          for (const hopUrl of getResponseHopUrls(response, page.url())) {
+            if (!isFilePath(hopUrl) && (await isInternalOrLoopbackUrl(hopUrl))) {
+              consoleLogger.warn(`Refusing sitemap body: ${url} redirected to internal address ${hopUrl}`);
+              data = '';
+              return;
+            }
+          }
+          let remoteIpSeen = false;
           try {
-            const serverAddr = await response.serverAddr();
-            const remoteIp = serverAddr?.ipAddress;
+            // Only trusted for direct connections (proxy-safe).
+            const remoteIp = await getDirectServerAddr(response);
             if (remoteIp) {
+              remoteIpSeen = true;
               const bare = remoteIp.replace(/^\[|\]$/g, '').toLowerCase();
               const isInternal = isIpv4Literal(bare)
                 ? isInternalIpv4(bare)
@@ -1392,8 +1791,16 @@ export const getLinksFromSitemap = async (
             }
           } catch {
             // serverAddr() is best-effort — Chromium may not report it for
-            // service-worker/cached responses. Fall through so the operator
-            // still sees ordinary sitemap discovery for those cases.
+            // service-worker/cached responses.
+          }
+          // asgard-0012 (2026-10-09 scan): when serverAddr() gave nothing, the
+          // post-connect check above never ran. Re-resolve the host now and
+          // refuse internal answers, so a rebinding resolver must keep serving
+          // the internal IP to us as well — not just once to the browser.
+          if (!remoteIpSeen && !isFilePath(url) && (await isInternalOrLoopbackUrl(url))) {
+            consoleLogger.warn(`Refusing sitemap body: ${url} now resolves to an internal address`);
+            data = '';
+            return;
           }
         }
 
@@ -1520,7 +1927,7 @@ export const getLinksFromSitemap = async (
             // off-scope host. Apply the same strategy gate here, and refuse
             // hosts that resolve into private/link-local/loopback ranges
             // before invoking page.goto().
-            if (userUrl && !isFollowStrategy(childSitemapUrlText, userUrl, strategy)) {
+            if (!isInSitemapScope(childSitemapUrlText)) {
               consoleLogger.info(
                 `Skipping off-strategy child sitemap: ${childSitemapUrlText}`,
               );
@@ -1747,7 +2154,7 @@ export const getClonedProfilesWithRandomToken = (browser: string, randomToken: s
   // Keep the path short — Chrome creates Unix sockets inside TMPDIR-based paths,
   // and socket paths are limited to 107 bytes on Linux.
   // Use process.pid to isolate concurrent scan instances.
-  if (fs.existsSync('/.dockerenv')) {
+  if (isRunningInContainer()) {
     const baseDir = getDefaultChromiumDataDir();
     if (baseDir) {
       const scanTmpDir = path.join(baseDir, 'tmp', String(process.pid));
@@ -2502,25 +2909,10 @@ export const getPlaywrightLaunchOptions = (browser?: string): LaunchOptions => {
   // whenever a SOCKS5 proxy is set, which triggers Chrome's yellow
   // "unsupported command-line flag" banner. --test-type suppresses it (and the
   // automation info bar), matching what we already do in Docker.
-  // `/.dockerenv` is only created by the Docker daemon. Other container
-  // runtimes (Podman, containerd, ECS Fargate, Azure Container Apps / App
-  // Service, Google Cloud Run / App Engine, and Kubernetes) don't drop that
-  // marker file, so we also check well-known runtime env vars — otherwise we'd
-  // re-enable the Chrome sandbox and SIGABRT during zygote init under those
-  // seccomp profiles. OOBEE_IN_CONTAINER=1 is an explicit override for
-  // runtimes we don't detect (e.g. Azure Container Instances, which surfaces
-  // no reliable env var).
-  const inDocker =
-    process.env.OOBEE_IN_CONTAINER === '1' ||
-    fs.existsSync('/.dockerenv') ||
-    fs.existsSync('/run/.containerenv') ||
-    !!process.env.KUBERNETES_SERVICE_HOST ||        // Kubernetes (incl. GKE, EKS, AKS)
-    process.env.AWS_EXECUTION_ENV === 'AWS_ECS_FARGATE' ||
-    !!process.env.ECS_CONTAINER_METADATA_URI_V4 ||  // AWS ECS (Fargate + EC2)
-    !!process.env.CONTAINER_APP_NAME ||             // Azure Container Apps
-    !!process.env.WEBSITE_INSTANCE_ID ||            // Azure App Service (Linux containers)
-    !!process.env.K_SERVICE ||                      // Google Cloud Run
-    !!process.env.GAE_SERVICE;                      // Google App Engine (flex/standard)
+  // Container detection covers non-Docker runtimes too (see
+  // isRunningInContainer) — otherwise we'd re-enable the Chrome sandbox and
+  // SIGABRT during zygote init under those seccomp profiles.
+  const inDocker = isRunningInContainer();
   const usingProxy = resolution.kind === 'manual' || resolution.kind === 'pac';
   if ((inDocker || usingProxy) && !finalArgs.includes('--test-type')) {
     finalArgs.push('--test-type');
@@ -2544,7 +2936,57 @@ export const getPlaywrightLaunchOptions = (browser?: string): LaunchOptions => {
   return options;
 };
 
-export const waitForPageLoaded = async (page: Page) => {
+export type MainThreadIdleResult = {
+  reason: string;
+  waitedMs: number;
+};
+
+/**
+ * Waits until the page's main thread has had `requiredIdle` consecutive idle
+ * periods (requestIdleCallback with real idle time and no long tasks observed
+ * in between), or until `timeoutMs` elapses.
+ *
+ * This is the CPU-contention-safe complement to DOM-quiet heuristics: a
+ * wall-clock "no mutations for N ms" window can elapse while a starved
+ * renderer is still parsing/compiling the framework bundle, so hydration
+ * hasn't even started yet. A starved main thread does not yield idle periods,
+ * so this check cannot be satisfied until the page's pending JS has run.
+ */
+// Playwright's messages for a page that's gone — not net::ERR_CONNECTION_CLOSED.
+export const PAGE_GONE_ERROR_RE = /has been closed|Target crashed|was destroyed/i;
+
+export const waitForMainThreadIdle = async (
+  page: Page,
+  timeoutMs: number = Number(process.env.OOBEE_IDLE_TIMEOUT_MS) || 10000,
+): Promise<MainThreadIdleResult> => {
+  const requiredIdle = Number(process.env.OOBEE_IDLE_CALLBACKS) || 3;
+  const start = Date.now();
+  if (timeoutMs <= 0) {
+    return { reason: 'no idle budget', waitedMs: 0 };
+  }
+
+  let deadlineTimer: ReturnType<typeof setTimeout>;
+  const result = await Promise.race([
+    new Promise<{ reason: string }>(resolve => {
+      deadlineTimer = setTimeout(
+        () => resolve({ reason: 'idle hard deadline' }),
+        timeoutMs,
+      );
+    }),
+    page
+      .evaluate(waitForMainThreadIdleInPage, { requiredIdle, timeoutMs })
+      .catch((err: unknown) =>
+        page.isClosed() || PAGE_GONE_ERROR_RE.test(String((err as Error)?.message ?? err))
+          ? { reason: 'page closed' }
+          : { reason: 'idle probe errored' },
+      ),
+  ]);
+  clearTimeout(deadlineTimer);
+
+  return { ...result, waitedMs: Date.now() - start };
+};
+
+export const waitForPageLoaded = async (page: Page): Promise<{ mainThreadBusy: boolean }> => {
   // Budgets are stacked (load, then stability), not shared, so a slow-loading
   // page still gets a fresh window to hydrate. Defaults are sized for busy
   // Docker containers under CPU contention; lower them locally via env vars
@@ -2554,15 +2996,34 @@ export const waitForPageLoaded = async (page: Page) => {
   const quietMs          = Number(process.env.OOBEE_QUIET_MS)             || 1500;
   const maxMutations     = Number(process.env.OOBEE_MAX_MUTATIONS)        || 5000;
   const assetWaitMs      = Number(process.env.OOBEE_ASSET_WAIT_MS)        || 5000;
+  const idleTimeout      = Number(process.env.OOBEE_IDLE_TIMEOUT_MS)      || 10000;
+  // Overall ceiling across every phase. The stacked per-phase budgets above
+  // sum to ~85-100s worst case, which exceeds the crawlers' 90s
+  // requestHandlerTimeoutSecs: Crawlee then closes the page mid-handler and
+  // the rest of the handler (axe, click discovery) runs against a dead page.
+  // Each phase below is clipped to whatever remains of this budget.
+  const totalBudgetMs    = Number(process.env.OOBEE_PAGE_LOAD_BUDGET_MS)  || 60000;
+  const budgetDeadline = Date.now() + totalBudgetMs;
+  const remaining = (phaseMs: number) => Math.max(0, Math.min(phaseMs, budgetDeadline - Date.now()));
 
   // Phase 1 — wait for the `load` event (or its own hard deadline).
   const phase1Start = Date.now();
+  let loadTimer: ReturnType<typeof setTimeout>;
   const loadReason = await Promise.race([
     page.waitForLoadState('load').then(() => 'load event fired').catch(() => 'load errored'),
-    new Promise<string>(resolve =>
-      setTimeout(() => resolve('load hard deadline'), loadTimeout),
-    ),
+    new Promise<string>(resolve => {
+      loadTimer = setTimeout(() => resolve('load hard deadline'), remaining(loadTimeout));
+    }),
   ]);
+  clearTimeout(loadTimer);
+
+  // Phase 1.5 — wait for the main thread to go idle before starting the
+  // DOM-quiet window. Under CPU contention (e.g. concurrent scans sharing a
+  // container) a renderer can still be parsing/compiling the framework bundle
+  // well after `load`; the phase-2 quiet window would elapse before hydration
+  // even begins and axe would scan the pre-hydration SSR markup.
+  const preIdle = await waitForMainThreadIdle(page, remaining(idleTimeout));
+  if (page.isClosed()) return { mainThreadBusy: false };
 
   // Phase 2 — wait for the DOM to stabilize OR the stability budget.
   //
@@ -2572,10 +3033,12 @@ export const waitForPageLoaded = async (page: Page) => {
   // role="tab" children into a role="tablist" container). The observer's own
   // initial quiet window is the correct "no work in progress" signal.
   const phase2Start = Date.now();
+  const phase2BudgetMs = remaining(stabilityTimeout);
+  let stabilityTimer: ReturnType<typeof setTimeout>;
   const stabilityReason = await Promise.race([
-    new Promise<string>(resolve =>
-      setTimeout(() => resolve('stability hard deadline'), stabilityTimeout),
-    ),
+    new Promise<string>(resolve => {
+      stabilityTimer = setTimeout(() => resolve('stability hard deadline'), phase2BudgetMs);
+    }),
     page.evaluate(
       ({
         stabilityTimeout: OBSERVER_TIMEOUT,
@@ -2658,9 +3121,68 @@ export const waitForPageLoaded = async (page: Page) => {
           });
         });
       },
-      { stabilityTimeout, quietMs, maxMutations },
+      { stabilityTimeout: phase2BudgetMs, quietMs, maxMutations },
     ).catch(() => 'observer errored'),
   ]);
+  clearTimeout(stabilityTimer);
+
+  // Post-quiet idle check — the quiet window is wall-clock based, so a
+  // hydration task that was queued behind a starved main thread can run right
+  // as it closes. If the main thread did work since, give the DOM one more
+  // (bounded) quiet window to settle that work.
+  const postIdleStart = Date.now();
+  // A page that never yielded idle in phase 1.5 is perpetually busy (heavy
+  // ads, spin loops) rather than starved — don't pay the full idle budget
+  // twice; one quiet window's worth is enough to catch a just-queued task.
+  const preIdleTimedOut = !preIdle.reason.startsWith('main thread idle');
+  let postIdle = await waitForMainThreadIdle(page, remaining(preIdleTimedOut ? quietMs : idleTimeout));
+  let resettleReason = 'skipped';
+  // Only resettle when the thread demonstrably did work and then went idle —
+  // re-running for a perpetually busy page would just burn more budget.
+  if (
+    postIdle.reason === 'main thread idle after work' &&
+    stabilityReason !== 'stability hard deadline'
+  ) {
+    // Bounded by the same cap as the initial quiet window's outer deadline so
+    // a page that never stops mutating can't extend the wait indefinitely.
+    const resettleCapMs = remaining(Math.min(stabilityTimeout, quietMs * 4));
+    let resettleTimer: ReturnType<typeof setTimeout>;
+    resettleReason = await Promise.race([
+      new Promise<string>(resolve => {
+        resettleTimer = setTimeout(() => resolve('resettle hard deadline'), resettleCapMs);
+      }),
+      page
+        .evaluate(
+          ({ quietMs: QUIET_MS }) =>
+            new Promise<string>(resolve => {
+              const root = document.documentElement || document.body;
+              if (!(root instanceof Node)) {
+                resolve('no root to observe');
+                return;
+              }
+              let timeout: ReturnType<typeof setTimeout>;
+              const observer = new MutationObserver(() => {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                  observer.disconnect();
+                  resolve('resettled after mutations');
+                }, QUIET_MS);
+              });
+              timeout = setTimeout(() => {
+                observer.disconnect();
+                resolve('resettle quiet window elapsed');
+              }, QUIET_MS);
+              observer.observe(root, { childList: true, subtree: true, attributes: true });
+            }),
+          { quietMs },
+        )
+        .catch(() => 'resettle errored'),
+    ]);
+    clearTimeout(resettleTimer);
+    postIdle = await waitForMainThreadIdle(page, remaining(idleTimeout));
+  }
+  const postIdleMs = Date.now() - postIdleStart;
+  if (page.isClosed()) return { mainThreadBusy: false };
 
   // Phase 2.5 — wait for fonts and images (raster + SVG-as-<img>) to finish
   // loading. Both are deterministic browser signals: font swap reflows every
@@ -2669,10 +3191,11 @@ export const waitForPageLoaded = async (page: Page) => {
   // in phase 2 doesn't catch these — a font swap or SVG paint doesn't necessarily
   // produce a DOM mutation, but it does change measured geometry.
   const phase25Start = Date.now();
+  let assetTimer: ReturnType<typeof setTimeout>;
   const phase25Reason = await Promise.race([
-    new Promise<string>(resolve =>
-      setTimeout(() => resolve('asset hard deadline'), assetWaitMs),
-    ),
+    new Promise<string>(resolve => {
+      assetTimer = setTimeout(() => resolve('asset hard deadline'), remaining(assetWaitMs));
+    }),
     page
       .evaluate(
         () =>
@@ -2696,14 +3219,19 @@ export const waitForPageLoaded = async (page: Page) => {
       )
       .catch(() => 'asset probe errored'),
   ]);
+  clearTimeout(assetTimer);
 
-  const phase1Ms = phase2Start - phase1Start;
-  const phase2Ms = phase25Start - phase2Start;
+  const phase1Ms = phase2Start - phase1Start - preIdle.waitedMs;
+  const phase2Ms = postIdleStart - phase2Start;
   const phase25Ms = Date.now() - phase25Start;
+  const idleSummary =
+    `preIdle="${preIdle.reason}" (${preIdle.waitedMs}ms) ` +
+    `postIdle="${postIdle.reason}" resettle="${resettleReason}" (${postIdleMs}ms)`;
   // Log at debug level so operators can spot pages that need bigger budgets
   // (i.e. pages resolving via a hard deadline rather than a stability signal).
   // Emit warn only when we time out on stability — that's the case that most
   // often produces the intermittent hydration-timing findings.
+  if (page.isClosed()) return { mainThreadBusy: false };
   let pageUrl: string;
   try {
     pageUrl = page.url();
@@ -2711,17 +3239,39 @@ export const waitForPageLoaded = async (page: Page) => {
     pageUrl = '<unknown>';
   }
 
-  if (stabilityReason === 'stability hard deadline') {
+  if (Date.now() >= budgetDeadline) {
+    consoleLogger.warn(
+      `waitForPageLoaded: overall budget exhausted on ${pageUrl} (OOBEE_PAGE_LOAD_BUDGET_MS=${totalBudgetMs}); ` +
+        `later phases were cut short. load="${loadReason}" stability="${stabilityReason}" assets="${phase25Reason}" ${idleSummary}`,
+    );
+  } else if (stabilityReason === 'stability hard deadline') {
     consoleLogger.warn(
       `waitForPageLoaded: stability hard deadline on ${pageUrl} after ${phase1Ms}ms load + ${phase2Ms}ms stability + ${phase25Ms}ms assets. ` +
         `Page may still be hydrating. Consider raising OOBEE_STABILITY_TIMEOUT_MS (current: ${stabilityTimeout}) ` +
-        `or OOBEE_QUIET_MS (current: ${quietMs}).`,
+        `or OOBEE_QUIET_MS (current: ${quietMs}). ${idleSummary}`,
+    );
+  } else if (preIdle.reason === 'page closed' || postIdle.reason === 'page closed') {
+    consoleLogger.warn(
+      `waitForPageLoaded: page closed or renderer crashed (likely out of memory) on ${pageUrl} during the idle gate. ${idleSummary}`,
+    );
+  } else if (postIdle.reason !== 'main thread idle' && postIdle.reason !== 'main thread idle after work') {
+    // The main thread never went idle within budget — almost always CPU
+    // starvation (too many concurrent pages/scans for the available cores).
+    consoleLogger.warn(
+      `waitForPageLoaded: main thread still busy on ${pageUrl} — results may reflect a partially hydrated page. ` +
+        `Consider lowering concurrency (-t) or raising OOBEE_IDLE_TIMEOUT_MS (current: ${idleTimeout}). ${idleSummary}`,
     );
   } else {
     consoleLogger.debug(
-      `waitForPageLoaded: ${pageUrl} load="${loadReason}" (${phase1Ms}ms) stability="${stabilityReason}" (${phase2Ms}ms) assets="${phase25Reason}" (${phase25Ms}ms)`,
+      `waitForPageLoaded: ${pageUrl} load="${loadReason}" (${phase1Ms}ms) stability="${stabilityReason}" (${phase2Ms}ms) assets="${phase25Reason}" (${phase25Ms}ms) ${idleSummary}`,
     );
   }
+  return {
+    mainThreadBusy:
+      postIdle.reason !== 'main thread idle' &&
+      postIdle.reason !== 'main thread idle after work' &&
+      postIdle.reason !== 'page closed',
+  };
 };
 
 function isValidHttpUrl(urlString: string) {

@@ -123,12 +123,17 @@ export async function getPdfScreenshots(
   let pageCanvasCacheBytes = 0;
   let budgetExceededLogged = false;
 
-  // Opt-in cap on how many violation items get screenshots (asgard-0006). Off
-  // by default so every violation still gets a screenshot as before; set
-  // OOBEE_PDF_MAX_SCREENSHOTS to bound total work on a crafted many-violation PDF.
+  // Cap on screenshots per rule per PDF (asgard-0008). Items past the cap are
+  // still returned and reported — only their screenshot is omitted, which the
+  // report already handles — so no violation is under-reported. 500 is far
+  // beyond what a reviewer can use per rule, yet stops a crafted PDF forcing
+  // unbounded renders and PNG writes. Asgard's patch also capped the items
+  // themselves, which would drop real violations; rejected. "0" = unlimited.
   const maxPdfScreenshots = (() => {
-    const v = parseInt(process.env.OOBEE_PDF_MAX_SCREENSHOTS ?? '', 10);
-    return Number.isFinite(v) && v > 0 ? v : 0; // 0 = unlimited
+    const raw = process.env.OOBEE_PDF_MAX_SCREENSHOTS;
+    if (raw === undefined || raw.trim() === '') return 500;
+    const v = parseInt(raw, 10);
+    return Number.isFinite(v) && v >= 0 ? v : 500;
   })();
   let maxScreenshotsLogged = false;
 
@@ -143,91 +148,110 @@ export async function getPdfScreenshots(
       }
       break;
     }
-    const { context } = newItems[i];
-    const bbox: IBboxLocation = { location: context };
-    const bboxMap = buildBboxMap([bbox], structureTree);
+    // asgard-0007 (2026-10-12 re-scan): this loop processes PDFs downloaded
+    // from arbitrary scanned sites, so pdf.js internals derived from the
+    // PDF's own content (operator list, annotations, page geometry) are
+    // attacker-controlled. Sibling helpers (buildBboxMap, getBboxPage,
+    // annotateAndSave) are already wrapped in try/catch for exactly this
+    // reason, but this loop body itself was not — a single crafted PDF whose
+    // operator list produces an unexpected shape (e.g. a non-iterable
+    // trailing argsArray entry in getBboxesList) threw an uncaught
+    // exception that rejected the whole doPdfScreenshots call and the
+    // Promise.all awaiting it in crawlDomain/crawlSitemap/crawlLocalFile,
+    // aborting PDF-result finalization for the ENTIRE crawl over one bad
+    // PDF. Catch per-violation so a single malformed PDF/page only loses its
+    // own screenshot instead of the whole batch.
+    try {
+      const { context } = newItems[i];
+      const bbox: IBboxLocation = { location: context };
+      const bboxMap = buildBboxMap([bbox], structureTree);
 
-    for (const [pageNum, bboxList] of Object.entries(bboxMap)) {
-      const page = await pdf.getPage(parseInt(pageNum, 10));
+      for (const [pageNum, bboxList] of Object.entries(bboxMap)) {
+        const page = await pdf.getPage(parseInt(pageNum, 10));
 
-      // an array of length 1, containing location of current violation
-      const bboxesWithCoords = await Promise.all([
-        page.getOperatorList(),
-        page.getAnnotations(),
-      ]).then(getBboxesList(bboxList, page));
+        // an array of length 1, containing location of current violation
+        const bboxesWithCoords = await Promise.all([
+          page.getOperatorList(),
+          page.getAnnotations(),
+        ]).then(getBboxesList(bboxList, page));
 
-      // Render the page on a Node canvas with 200% scale.
-      const viewport = page.getViewport({ scale: 2.0 });
+        // Render the page on a Node canvas with 200% scale.
+        const viewport = page.getViewport({ scale: 2.0 });
 
-      // PDF page geometry (MediaBox) is attacker-controlled — during a
-      // crawl we download PDFs linked from arbitrary scanned sites. A
-      // crafted PDF declaring an enormous page size would force
-      // canvasFactory.create to allocate a W*H*4 byte buffer and OOM the
-      // scan worker. Clamp against the same MAX_CROP_DIMENSION used for
-      // the crop canvas below (200% of a typical A0 page is well under
-      // this bound; anything above is treated as malformed).
-      if (!isFinitePositive(viewport.width) || !isFinitePositive(viewport.height) ||
-          viewport.width > MAX_CROP_DIMENSION || viewport.height > MAX_CROP_DIMENSION) {
-        consoleLogger.warn(
-          `Skipping PDF page ${pageNum}: viewport dimensions out of bounds (${viewport.width}x${viewport.height})`,
-        );
-        page.cleanup();
-        continue;
-      }
-
-      const pageBytes = viewport.width * viewport.height * 4;
-      const alreadyCached = !!pageCanvasCache[pageNum];
-
-      // Cumulative-bytes guard: a single page passes MAX_CROP_DIMENSION but
-      // 50+ near-max pages together would still OOM. Refuse to render (and
-      // to cache) once the running total for this PDF exceeds the budget.
-      // Already-cached pages are free to reuse (they're already counted).
-      if (!alreadyCached && pageCanvasCacheBytes + pageBytes > PAGE_CANVAS_BUDGET_BYTES) {
-        if (!budgetExceededLogged) {
+        // PDF page geometry (MediaBox) is attacker-controlled — during a
+        // crawl we download PDFs linked from arbitrary scanned sites. A
+        // crafted PDF declaring an enormous page size would force
+        // canvasFactory.create to allocate a W*H*4 byte buffer and OOM the
+        // scan worker. Clamp against the same MAX_CROP_DIMENSION used for
+        // the crop canvas below (200% of a typical A0 page is well under
+        // this bound; anything above is treated as malformed).
+        if (!isFinitePositive(viewport.width) || !isFinitePositive(viewport.height) ||
+            viewport.width > MAX_CROP_DIMENSION || viewport.height > MAX_CROP_DIMENSION) {
           consoleLogger.warn(
-            `PDF page-canvas budget (${PAGE_CANVAS_BUDGET_BYTES} bytes) reached; skipping ` +
-            `screenshots for remaining pages of this PDF to avoid memory exhaustion.`,
+            `Skipping PDF page ${pageNum}: viewport dimensions out of bounds (${viewport.width}x${viewport.height})`,
           );
-          budgetExceededLogged = true;
+          page.cleanup();
+          continue;
         }
-        page.cleanup();
-        continue;
-      }
 
-      const canvasAndContext =
-        pageCanvasCache[pageNum] ?? canvasFactory.create(viewport.width, viewport.height);
-      if (!alreadyCached) {
-        pageCanvasCache[pageNum] = canvasAndContext;
-        pageCanvasCacheBytes += pageBytes;
-      }
-      const { canvas: origCanvas, context: origCtx } = canvasAndContext;
+        const pageBytes = viewport.width * viewport.height * 4;
+        const alreadyCached = !!pageCanvasCache[pageNum];
 
-      // Only render each page once: the cached canvas already holds the clean
-      // rendered page and annotateAndSave never mutates it, so re-rendering per
-      // violation is wasted CPU. A crafted PDF with many violations on a single
-      // page would otherwise force O(violations) full-page renders (asgard-0006).
-      if (!alreadyCached) {
-        const renderContext = {
-          canvasContext: origCtx,
+        // Cumulative-bytes guard: a single page passes MAX_CROP_DIMENSION but
+        // 50+ near-max pages together would still OOM. Refuse to render (and
+        // to cache) once the running total for this PDF exceeds the budget.
+        // Already-cached pages are free to reuse (they're already counted).
+        if (!alreadyCached && pageCanvasCacheBytes + pageBytes > PAGE_CANVAS_BUDGET_BYTES) {
+          if (!budgetExceededLogged) {
+            consoleLogger.warn(
+              `PDF page-canvas budget (${PAGE_CANVAS_BUDGET_BYTES} bytes) reached; skipping ` +
+              `screenshots for remaining pages of this PDF to avoid memory exhaustion.`,
+            );
+            budgetExceededLogged = true;
+          }
+          page.cleanup();
+          continue;
+        }
+
+        const canvasAndContext =
+          pageCanvasCache[pageNum] ?? canvasFactory.create(viewport.width, viewport.height);
+        if (!alreadyCached) {
+          pageCanvasCache[pageNum] = canvasAndContext;
+          pageCanvasCacheBytes += pageBytes;
+        }
+        const { canvas: origCanvas, context: origCtx } = canvasAndContext;
+
+        // Only render each page once: the cached canvas already holds the clean
+        // rendered page and annotateAndSave never mutates it, so re-rendering per
+        // violation is wasted CPU. A crafted PDF with many violations on a single
+        // page would otherwise force O(violations) full-page renders (asgard-0006).
+        if (!alreadyCached) {
+          const renderContext = {
+            canvasContext: origCtx,
+            viewport,
+            canvasFactory,
+          };
+          const renderTask = page.render(renderContext); // render pdf page onto a canvas
+          await renderTask.promise;
+        }
+
+        const finalScreenshotPath = annotateAndSave(
+          origCanvas,
+          screenshotPath,
           viewport,
-          canvasFactory,
-        };
-        const renderTask = page.render(renderContext); // render pdf page onto a canvas
-        await renderTask.promise;
+        )(bboxesWithCoords[0]);
+
+        if (finalScreenshotPath) {
+          newItems[i].screenshotPath = path.join('elemScreenshots', 'pdf', finalScreenshotPath);
+        }
+        newItems[i].page = parseInt(pageNum, 10);
+
+        page.cleanup();
       }
-
-      const finalScreenshotPath = annotateAndSave(
-        origCanvas,
-        screenshotPath,
-        viewport,
-      )(bboxesWithCoords[0]);
-
-      if (finalScreenshotPath) {
-        newItems[i].screenshotPath = path.join('elemScreenshots', 'pdf', finalScreenshotPath);
-      }
-      newItems[i].page = parseInt(pageNum, 10);
-
-      page.cleanup();
+    } catch (e) {
+      consoleLogger.warn(
+        `Skipping PDF screenshot for violation index ${i}: rendering a malformed/unexpected PDF structure threw ${e instanceof Error ? e.message : e}`,
+      );
     }
   }
 
@@ -698,7 +722,15 @@ const getTagsFromErrorPlace = (context: string, structure: StructureTree) => {
   return defaultValue;
 };
 
-const calculateLocation = location => {
+// asgard-0006: upper bound on the page span of a single veraPDF location.
+// The `pages[start-end]` range comes from a PDF downloaded from a scanned
+// (untrusted) site, and calculateLocation emits one entry per page in it —
+// buildBboxMap then renders each of those pages. A crafted range such as
+// pages[0-50000000] would otherwise exhaust the heap. 10,000 pages is far
+// beyond any single element spanning real document pages.
+export const MAX_PDF_LOCATION_PAGE_SPAN = 10_000;
+
+export const calculateLocation = location => {
   const bboxes = [];
   const [pages, boundingBox] = location.split('/');
   const [start, end] = pages.replace('pages[', '').replace(']', '').split('-');
@@ -706,15 +738,27 @@ const calculateLocation = location => {
   const width = parseFloat(x1) - parseFloat(x);
 
   if (end) {
-    for (let i = parseInt(start) + 1; i <= parseInt(end) + 1; i++) {
+    const startPage = parseInt(start, 10);
+    const endPage = parseInt(end, 10);
+    if (
+      !Number.isFinite(startPage) ||
+      !Number.isFinite(endPage) ||
+      startPage < 0 ||
+      endPage < startPage ||
+      endPage - startPage > MAX_PDF_LOCATION_PAGE_SPAN
+    ) {
+      console.error(`Location page range not supported: ${pages}`);
+      return bboxes;
+    }
+    for (let i = startPage + 1; i <= endPage + 1; i++) {
       switch (i) {
-        case parseInt(start) + 1:
+        case startPage + 1:
           bboxes.push({
             page: i,
             location: [parseFloat(x), parseFloat(y1), width, 'bottom'],
           });
           break;
-        case parseInt(end) + 1:
+        case endPage + 1:
           bboxes.push({
             page: i,
             location: [parseFloat(x), parseFloat(y), width, 'top'],

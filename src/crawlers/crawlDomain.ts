@@ -1,5 +1,5 @@
 import crawlee, { EnqueueStrategy } from 'crawlee';
-import { CrawlRateController } from './crawlRateController.js';
+import { CrawlRateController, startConcurrencyEnforcer } from './crawlRateController.js';
 import type { BrowserContext, ElementHandle, Frame, Page } from 'playwright';
 import type { PlaywrightCrawlingContext, RequestOptions } from 'crawlee';
 import {
@@ -12,6 +12,10 @@ import {
   shouldSkipClickDueToDisallowedHref,
   shouldSkipDueToUnsupportedContent,
   splitAuthHeaders,
+  addScopedHeaderRoute,
+  getOperatorHeaderScope,
+  hasCredentialHeaders,
+  recordUserExcluded,
 } from './commonCrawlerFunc.js';
 import constants, {
   UrlsCrawled,
@@ -31,6 +35,14 @@ import {
   isDisallowedInRobotsTxt,
   getUrlsFromRobotsTxt,
   waitForPageLoaded,
+  PAGE_GONE_ERROR_RE,
+  isInternalOrLoopbackUrl,
+  isLinkLocalOrMetadataUrl,
+  makeHostKindCache,
+  isRefusedHostKind,
+  classifyServerAddress,
+  getDirectServerAddr,
+  getResponseHopUrls,
 } from '../constants/common.js';
 import { areLinksEqual, isFollowStrategy, isSameHostname, normUrl, register } from '../utils.js';
 import {
@@ -71,7 +83,7 @@ const crawlDomain = async ({
   maxRequestsPerCrawl,
   browser,
   userDataDirectory,
-  strategy,
+  strategy = EnqueueStrategy.SameDomain,
   specifiedMaxConcurrency,
   fileTypes,
   blacklistedPatterns,
@@ -93,7 +105,7 @@ const crawlDomain = async ({
   maxRequestsPerCrawl: number;
   browser: string;
   userDataDirectory: string;
-  strategy: EnqueueStrategy;
+  strategy?: EnqueueStrategy;
   specifiedMaxConcurrency: number;
   fileTypes: FileTypes;
   blacklistedPatterns: string[];
@@ -249,8 +261,20 @@ const crawlDomain = async ({
     // (navigation, popup/frame events, and potential page recreation).
     // Running iterations in parallel (for example with Promise.all) would race on shared `page`
     // state, causing stale element handles and nondeterministic enqueue/navigation behavior.
+    // Hard bound on click discovery. Crawlee can't cancel a timed-out
+    // requestHandler — it just closes the page — so without an exit on a
+    // closed page and a deadline, every Playwright call below fails instantly,
+    // the catch swallows it and this loop spins forever at 100% CPU (one leaked
+    // loop per timed-out page). On a CPU-starved container that compounds into
+    // multi-hour stalls.
+    const clickDiscoveryDeadline =
+      Date.now() + (Number(process.env.OOBEE_CLICK_DISCOVERY_MAX_MS) || 30000);
+    const isPageGone = (err?: unknown): boolean =>
+      workingPage.isClosed() ||
+      (err instanceof Error && PAGE_GONE_ERROR_RE.test(err.message));
     /* eslint-disable no-await-in-loop */
     while (!isAllElementsHandled) {
+      if (isPageGone() || Date.now() > clickDiscoveryDeadline) break;
       try {
         // navigate back to initial page if clicking on a element previously caused it to navigate to a new url
         if (workingPage.url() !== initialPageUrl) {
@@ -261,6 +285,21 @@ const crawlDomain = async ({
             // Handles browser page object been closed.
           }
           workingPage = await browserContext.newPage();
+          // asgard-0003 (2026-10-10 re-scan): Crawlee's egress checks
+          // (isRefusedEgressUrl / preNavigationHooks) only run for
+          // navigations Crawlee itself drives from the request queue. This
+          // goto() is a manual re-navigation back to the already-approved
+          // initialPageUrl, so it's not re-fetching a new attacker-supplied
+          // target — but guard it anyway in case initialPageUrl has since
+          // been rebound to something unsafe by an in-page redirect that
+          // slipped past isExcluded. addUrlGuardScript only enforces the
+          // scheme allowlist, not internal/loopback/metadata classification.
+          if (await isRefusedEgressUrl(initialPageUrl, {})) {
+            consoleLogger.warn(
+              `Refusing click-discovery re-navigation to internal/metadata address: ${initialPageUrl}`,
+            );
+            break;
+          }
           await workingPage.goto(initialPageUrl, {
             waitUntil: 'domcontentloaded',
           });
@@ -338,9 +377,10 @@ const crawlDomain = async ({
             }
           }
         }
-      } catch {
+      } catch (err) {
         // No logging for this case as it is best effort to handle dynamic client-side JavaScript redirects and clicks.
         // Handles browser page object been closed.
+        if (isPageGone(err)) break;
       }
     }
     /* eslint-enable no-await-in-loop */
@@ -351,13 +391,25 @@ const crawlDomain = async ({
     enqueueLinks: PlaywrightCrawlingContext['enqueueLinks'],
     browserContext: BrowserContext,
   ) => {
+    // Crawlee builds its strategy filter as a glob from the origin, and minimatch
+    // reads "[::1]" as a character class, so every link on an IPv6-literal site
+    // was dropped. For those hosts, filter with isFollowStrategy ourselves.
+    const pageUrl = page.url();
+    const isIpv6Host = (() => {
+      try {
+        return new URL(pageUrl).hostname.startsWith('[');
+      } catch {
+        return false;
+      }
+    })();
     try {
       await enqueueLinks({
         // set selector matches anchor elements with href but not contains # or starting with mailto:
         selector: `a:not(${disallowedSelectorPatterns})`,
-        strategy,
+        strategy: isIpv6Host ? EnqueueStrategy.All : strategy,
         requestQueue,
         transformRequestFunction: (req: RequestOptions): RequestOptions | null => {
+          if (isIpv6Host && !isFollowStrategy(req.url, url, strategy)) return null;
           try {
             req.url = req.url.replace(/(?<=&|\?)utm_.*?(&|$)/gim, '');
           } catch (e) {
@@ -366,7 +418,10 @@ const crawlDomain = async ({
           if (scannedUrlSet.has(normUrl(req.url))) {
             req.skipNavigation = true;
           }
-          if (isDisallowedInRobotsTxt(req.url)) return null;
+          if (isDisallowedInRobotsTxt(req.url)) {
+            recordUserExcluded(urlsCrawled, req.url, 4);
+            return null;
+          }
           if (isBlacklisted(req.url, blacklistedPatterns)) return null;
           if (isUrlPdf(req.url)) {
             // playwright headless mode does not support navigation to pdf document
@@ -424,9 +479,11 @@ const crawlDomain = async ({
   // ON whenever credentials are attached, and require an explicit opt-in env
   // var for credential-less scans that legitimately need to reach hosts with
   // broken certs.
-  const hasCredentials =
-    !!httpCredentials ||
-    Object.keys(extraHTTPHeaders || {}).some(k => k.toLowerCase() === 'authorization');
+  // asgard-0008 (2026-10-09 scan): Cookie / API-key style headers are
+  // credentials too, so they also keep TLS validation on.
+  const hasCredentials = !!httpCredentials || hasCredentialHeaders(extraHTTPHeaders);
+  const scopeOperatorHeaders = getOperatorHeaderScope() !== 'all';
+  const scopedHeaderContexts = new WeakSet<BrowserContext>();
   const allowInsecureTls =
     !hasCredentials &&
     ['1', 'true', 'yes'].includes(
@@ -437,6 +494,37 @@ const crawlDomain = async ({
       '[crawlDomain] Credentials detected — enforcing TLS certificate validation for this scan',
     );
   }
+
+  // asgard-0005: egress policy for URLs discovered on scanned pages.
+  // Not a blanket private-range block (as asgard suggested): crawling an
+  // intranet, localhost dev server or Tailscale-hosted site is a core use
+  // case, and its own links naturally point at internal addresses.
+  //  - link-local / cloud-metadata: always refused; no a11y target lives there.
+  //  - loopback / RFC1918 / CGNAT / ULA: refused only when the entry URL is
+  //    itself public, i.e. a public site trying to pivot the browser inward.
+  //    OOBEE_ALLOW_INTERNAL_TARGETS=1 still lifts the private-range part.
+  const entryIsInternal = await isInternalOrLoopbackUrl(url);
+  // One DNS lookup per host per page, shared by the before-load check and the
+  // after-load hop checks of the same request (WeakMap on the Request, never
+  // reused across pages).
+  const pageHostKinds = new WeakMap<object, ReturnType<typeof makeHostKindCache>>();
+  const hostKindsFor = (req: object) => {
+    let c = pageHostKinds.get(req);
+    if (!c) {
+      c = makeHostKindCache();
+      pageHostKinds.set(req, c);
+    }
+    return c;
+  };
+  const isRefusedEgressUrl = async (target: string, req: object): Promise<boolean> => {
+    const kind = await hostKindsFor(req)(target);
+    // Non-http(s) targets are rejected separately by ALLOWED_NAV_PROTOCOLS.
+    return isRefusedHostKind(kind, entryIsInternal);
+  };
+  const isRefusedServerAddress = (remoteIp: string): boolean => {
+    const kind = classifyServerAddress(remoteIp);
+    return kind === 'metadata' || (kind === 'internal' && !entryIsInternal);
+  };
 
   // Shared with handlePdfDownload so PDFs stream through the same client the crawler uses.
   const httpClient = new crawlee.GotScrapingHttpClient();
@@ -449,6 +537,14 @@ const crawlDomain = async ({
         launchOptions: getPlaywrightLaunchOptions(browser),
       },
       retryOnBlocked: false,
+      // Crawlee's session pool treats 401/403/429 as "blocked" by default: it
+      // throws before the requestHandler runs and retires the session, which
+      // retires the whole browser. Combined with maxRequestRetries and the
+      // ratelimit_ re-enqueue below, every blocked URL cost ~8 navigations and
+      // ~8 Chrome relaunches — hours on a 2 vCPU container when a WAF blocks
+      // most of a large sitemap. Let these statuses reach the requestHandler,
+      // which records them and retries once via the ratelimit_ re-enqueue.
+      sessionPoolOptions: { blockedStatusCodes: [] },
       browserPoolOptions: {
         useFingerprints: false,
         retireBrowserAfterPageCount: 500,
@@ -463,7 +559,9 @@ const crawlDomain = async ({
               ...playwrightDeviceDetailsObject,
               ...(process.env.OOBEE_USER_AGENT && { userAgent: process.env.OOBEE_USER_AGENT }),
               ...(process.env.OOBEE_DISABLE_BROWSER_DOWNLOAD && { acceptDownloads: false }),
-              ...(nonAuthHeaders && { extraHTTPHeaders: nonAuthHeaders }),
+              // asgard-0008: scoped per request below unless the operator
+              // opted back into legacy send-everywhere headers.
+              ...(!scopeOperatorHeaders && nonAuthHeaders && { extraHTTPHeaders: nonAuthHeaders }),
               ...(httpCredentials && { httpCredentials }),
             };
           },
@@ -473,7 +571,29 @@ const crawlDomain = async ({
       requestQueue,
       maxRequestRetries: 3,
       preNavigationHooks: [
-        ...preNavigationHooks(extraHTTPHeaders, url),
+        // asgard-0008: preNavigationHooks copies its headers onto
+        // request.headers, which Crawlee applies page-wide. When scoping, give
+        // it only Authorization (already origin-gated) and attach the rest
+        // per request within the entry site.
+        ...preNavigationHooks(
+          scopeOperatorHeaders
+            ? Object.fromEntries(
+                Object.entries(extraHTTPHeaders || {}).filter(([k]) => k.toLowerCase() === 'authorization'),
+              )
+            : extraHTTPHeaders,
+          url,
+        ),
+        async ({ page }) => {
+          if (!scopeOperatorHeaders || !nonAuthHeaders) return;
+          const ctx = page.context();
+          if (scopedHeaderContexts.has(ctx)) return;
+          scopedHeaderContexts.add(ctx);
+          await addScopedHeaderRoute(ctx, url, nonAuthHeaders);
+        },
+        // Renderer crashes are almost always OOM; let the controller shed load.
+        async ({ page, request }) => {
+          page.once('crash', () => rateController.onRendererCrash(crawler.autoscaledPool, request.url));
+        },
         // Attach URL-scheme guards to each new BrowserContext the first time
         // Crawlee routes a request through it. Complements the up-front URL
         // filter below by catching in-page navigations (window.open,
@@ -495,6 +615,11 @@ const crawlDomain = async ({
               request.skipNavigation = true;
               return;
             }
+            if (await isRefusedEgressUrl(request.url, request)) {
+              consoleLogger.warn(`Refusing to navigate to internal/metadata address: ${request.url}`);
+              request.skipNavigation = true;
+              return;
+            }
             const ext = parsed.pathname.toLowerCase().split('.').pop();
             if (ext && blackListedFileExtensions.includes(ext)) {
               request.skipNavigation = true;
@@ -506,38 +631,54 @@ const crawlDomain = async ({
       ],
       postNavigationHooks: [
         async crawlingContext => {
-          const { page, request } = crawlingContext;
+          const { page, request, response } = crawlingContext;
+
+          // Blocked responses are recorded/retried without being scanned, so
+          // there's nothing to wait for. Without this, every 403/429 paid the
+          // full observer cap — serialised once the rate controller has
+          // dropped concurrency to 1, that's 5s × every blocked URL × 2.
+          const navStatus = response?.status();
+          const isBlockedResponse = navStatus === 403 || navStatus === 429;
 
           try {
-            await page.evaluate(() => {
+            if (!isBlockedResponse) await page.evaluate(() => {
               return new Promise(resolve => {
-                let timeout;
+                let timeout: ReturnType<typeof setTimeout>;
+                let hardCap: ReturnType<typeof setTimeout>;
                 let mutationCount = 0;
                 const MAX_MUTATIONS = 500; // stop if things never quiet down
                 const OBSERVER_TIMEOUT = 5000; // hard cap on total wait
+                const QUIET_MS = 1000;
+
+                const finish = (reason: string) => {
+                  clearTimeout(timeout);
+                  clearTimeout(hardCap);
+                  observer.disconnect();
+                  resolve(reason);
+                };
 
                 const observer = new MutationObserver(() => {
                   clearTimeout(timeout);
 
                   mutationCount += 1;
                   if (mutationCount > MAX_MUTATIONS) {
-                    observer.disconnect();
-                    resolve('Too many mutations, exiting.');
+                    finish('Too many mutations, exiting.');
                     return;
                   }
 
                   // restart quiet‑period timer
-                  timeout = setTimeout(() => {
-                    observer.disconnect();
-                    resolve('DOM stabilized.');
-                  }, 1000);
+                  timeout = setTimeout(() => finish('DOM stabilized.'), QUIET_MS);
                 });
 
-                // overall timeout in case the page never settles
-                timeout = setTimeout(() => {
-                  observer.disconnect();
-                  resolve('Observer timeout reached.');
-                }, OBSERVER_TIMEOUT);
+                // Initial quiet window: a page that never mutates is already
+                // stable. This previously used OBSERVER_TIMEOUT, so every
+                // static page (incl. WAF block pages) waited the full 5s.
+                timeout = setTimeout(() => finish('No mutations, DOM stable.'), QUIET_MS);
+                // Overall cap in case the page never settles. Separate timer:
+                // the old code reused `timeout`, so the first mutation cleared
+                // the cap and a steady trickle of mutations could extend the
+                // wait indefinitely (bounded only by MAX_MUTATIONS).
+                hardCap = setTimeout(() => finish('Observer timeout reached.'), OBSERVER_TIMEOUT);
 
                 const root = document.documentElement || document.body || document;
                 if (!root || typeof observer.observe !== 'function') {
@@ -560,6 +701,9 @@ const crawlDomain = async ({
           // to handle scenario where the redirected link is not within the scanning website
           const isLoadedUrlFollowStrategy = isFollowStrategy(finalUrl, requestLabelUrl, strategy);
           if (!isLoadedUrlFollowStrategy) {
+            // Crawlee can drop this request before requestHandler runs, so record it here.
+            urlsCrawled.notScannedRedirects.push({ fromUrl: requestLabelUrl, toUrl: finalUrl });
+            recordUserExcluded(urlsCrawled, requestLabelUrl, 0, finalUrl);
             finalUrl = requestLabelUrl;
           }
 
@@ -588,11 +732,53 @@ const crawlDomain = async ({
       }) => {
         const browserContext: BrowserContext = page.context();
         try {
-          await waitForPageLoaded(page);
+          // Blocked responses are recorded (or retried) below without being
+          // scanned — don't spend the full page-stability budget on a WAF page.
+          const earlyStatus = response?.status();
+          if (earlyStatus !== 403 && earlyStatus !== 429) {
+            const { mainThreadBusy } = await waitForPageLoaded(page);
+            rateController.onPageLoad(mainThreadBusy, crawler.autoscaledPool);
+          }
           let actualUrl = page.url() || request.loadedUrl || request.url;
 
           if (page.url() !== 'about:blank') {
             actualUrl = page.url();
+          }
+
+          // asgard-0005: the pre-nav check can't see 3xx targets or a DNS answer
+          // that changes between our lookup and the browser's. Crawlee routes
+          // Chrome through a local proxy (and FAMILY_DNS / CF Worker add a
+          // SOCKS5 one), so serverAddr() is usually the proxy's 127.0.0.1 and
+          // can't be trusted. Check every redirect hop and the final URL
+          // (fresh DNS lookup each), plus the connected address only when the
+          // connection was direct.
+          if (response) {
+            let refusedAt: string | null = null;
+            for (const hopUrl of getResponseHopUrls(response, actualUrl)) {
+              if (await isRefusedEgressUrl(hopUrl, request)) {
+                refusedAt = hopUrl;
+                break;
+              }
+            }
+            if (!refusedAt) {
+              const directIp = await getDirectServerAddr(response);
+              if (directIp && isRefusedServerAddress(directIp)) refusedAt = directIp;
+            }
+            if (refusedAt) {
+              consoleLogger.warn(`Refusing content from internal address ${refusedAt} (${actualUrl})`);
+              guiInfoLog(guiInfoStatusTypes.SKIPPED, {
+                numScanned: urlsCrawled.scanned.length,
+                urlScanned: request.url,
+              });
+              urlsCrawled.userExcluded.push({
+                url: request.url,
+                pageTitle: request.url,
+                actualUrl: request.url,
+                metadata: STATUS_CODE_METADATA[1],
+                httpStatusCode: 1,
+              });
+              return;
+            }
           }
 
           if (actualUrl.startsWith('chrome-error:')) {
@@ -625,6 +811,7 @@ const crawlDomain = async ({
               numScanned: urlsCrawled.scanned.length,
               urlScanned: actualUrl,
             });
+            recordUserExcluded(urlsCrawled, request.url, isBlacklisted(actualUrl, blacklistedPatterns) ? 0 : 1, actualUrl);
             return;
           }
 
@@ -646,6 +833,7 @@ const crawlDomain = async ({
           }
 
           if (isDisallowedInRobotsTxt(request.url)) {
+            recordUserExcluded(urlsCrawled, request.url, 4);
             await enqueueProcess(page, enqueueLinks, browserContext);
             return;
           }
@@ -676,6 +864,7 @@ const crawlDomain = async ({
               httpClient,
               urlsCrawled,
               session,
+              entryIsInternal,
             );
 
             uuidToPdfMapping[pdfFileName] = downloadedPdfUrl;
@@ -730,12 +919,43 @@ const crawlDomain = async ({
                 fromUrl: request.url,
                 toUrl: actualUrl, // i.e. actualUrl
               });
+              urlsCrawled.userExcluded.push({
+                url: request.url,
+                pageTitle: request.url,
+                actualUrl,
+                metadata: STATUS_CODE_METADATA[0],
+                httpStatusCode: 0,
+              });
               return;
             }
 
             const responseStatus = response?.status();
-            if (responseStatus === 403) {
-              rateController.onFailure(responseStatus, activeCrawler.autoscaledPool);
+            if (responseStatus === 403 || responseStatus === 429) {
+              const isRetry = request.userData?.rateLimitRetried === true;
+              if (
+                rateController.onFailure(responseStatus, activeCrawler.autoscaledPool, {
+                  skipConcurrencyReduction: isRetry,
+                })
+              ) {
+                consoleLogger.info(
+                  `Aborting crawl: consecutive HTTP failures threshold reached (site may be rate-limiting). Successfully scanned ${urlsCrawled.scanned.length} pages.`,
+                );
+                isAbortingScanNow = true;
+                activeCrawler.autoscaledPool?.abort();
+              }
+              // Retry once (at the back of the queue, after concurrency has
+              // dropped) before recording the URL as blocked.
+              if (!isRetry && !isAbortingScanNow) {
+                try {
+                  await requestQueue.addRequest({
+                    url: request.url,
+                    label: request.url,
+                    uniqueKey: `ratelimit_${request.url}`,
+                    userData: { rateLimitRetried: true },
+                  });
+                  return;
+                } catch {}
+              }
               guiInfoLog(guiInfoStatusTypes.SKIPPED, {
                 numScanned: urlsCrawled.scanned.length,
                 urlScanned: request.url,
@@ -744,8 +964,8 @@ const crawlDomain = async ({
                 url: request.url,
                 pageTitle: request.url,
                 actualUrl,
-                metadata: STATUS_CODE_METADATA[403] || STATUS_CODE_METADATA[599],
-                httpStatusCode: 403,
+                metadata: STATUS_CODE_METADATA[responseStatus] || STATUS_CODE_METADATA[599],
+                httpStatusCode: responseStatus,
               });
               return;
             }
@@ -768,8 +988,10 @@ const crawlDomain = async ({
                   uniqueKey: `5xx_${request.url}`,
                   userData: { serverErrorRetried: true },
                 });
-              } catch {}
-              return;
+                return;
+              } catch {
+                // Re-enqueue failed: fall through so the URL is recorded below.
+              }
             }
 
             if (responseStatus && responseStatus >= 300) {
@@ -786,6 +1008,11 @@ const crawlDomain = async ({
               });
               return;
             }
+
+            if (isAbortingScanNow) return;
+            // A closed page mid-request is a failure, not a skip: throw so the
+            // request is retried/recorded instead of silently disappearing.
+            if (page.isClosed()) throw new Error(`Page closed before scan: ${request.url}`);
 
             const results = await runAxeScript({ includeScreenshots, page, randomToken, ruleset });
 
@@ -820,10 +1047,17 @@ const crawlDomain = async ({
               page.off('framenavigated', onFrameNavigated);
 
               const postScanUrl = navigatedToUrl || page.url();
-              if (postScanUrl && postScanUrl !== 'about:blank' && !isFollowStrategy(postScanUrl, request.url, 'same-hostname')) {
+              if (postScanUrl && postScanUrl !== 'about:blank' && !isFollowStrategy(postScanUrl, request.url, strategy)) {
                 urlsCrawled.notScannedRedirects.push({
                   fromUrl: request.url,
                   toUrl: postScanUrl,
+                });
+                urlsCrawled.userExcluded.push({
+                  url: request.url,
+                  pageTitle: request.url,
+                  actualUrl: postScanUrl,
+                  metadata: STATUS_CODE_METADATA[0],
+                  httpStatusCode: 0,
                 });
                 return;
               }
@@ -892,24 +1126,11 @@ const crawlDomain = async ({
               await dataset.pushData(results);
             }
           } else {
-            // Don't inform the user it is skipped since web crawler is best-effort.
-            /*
-          guiInfoLog(guiInfoStatusTypes.SKIPPED, {
-            numScanned: urlsCrawled.scanned.length,
-            urlScanned: request.url,
-          });
-          urlsCrawled.userExcluded.push({
-            url: request.url,
-            pageTitle: request.url,
-            actualUrl, // because about:blank is not useful
-            metadata: STATUS_CODE_METADATA[1],
-            httpStatusCode: 0,
-          });
-          */
+            recordUserExcluded(urlsCrawled, request.url, 0, actualUrl);
           }
 
           if (followRobots)
-            await getUrlsFromRobotsTxt(request.url, browser, userDataDirectory, extraHTTPHeaders);
+            await getUrlsFromRobotsTxt(request.url, browser, userDataDirectory, extraHTTPHeaders, url);
           await enqueueProcess(page, enqueueLinks, browserContext);
         } catch (e) {
           // asgard-0013: this recovery path used to leak a browser page on every
@@ -928,23 +1149,35 @@ const crawlDomain = async ({
               });
 
               recoveryPage = await browserContext.newPage();
-              await recoveryPage.goto(request.url);
+              // asgard-0003 (2026-10-10 re-scan): this error-recovery
+              // navigation re-requests request.url outside Crawlee's
+              // request-queue-driven navigation path, so preNavigationHooks'
+              // isRefusedEgressUrl check never runs for it. Apply the same
+              // egress policy here before navigating.
+              if (await isRefusedEgressUrl(request.url, request)) {
+                consoleLogger.warn(
+                  `Refusing error-recovery navigation to internal/metadata address: ${request.url}`,
+                );
+              } else {
+                await recoveryPage.goto(request.url);
 
-              await recoveryPage.route('**/*', async route => {
-                const interceptedRequest = route.request();
-                if (interceptedRequest.resourceType() === 'document') {
-                  const interceptedRequestUrl = interceptedRequest
-                    .url()
-                    .replace(/(?<=&|\?)utm_.*?(&|$)/gim, '');
-                  if (!isExcludedFromEnqueue(interceptedRequestUrl)) {
-                    await enqueueUniqueRequest({
-                      url: interceptedRequestUrl,
-                      skipNavigation: isUrlPdf(interceptedRequest.url()),
-                      label: interceptedRequestUrl,
-                    });
+                await recoveryPage.route('**/*', async route => {
+                  const interceptedRequest = route.request();
+                  if (interceptedRequest.resourceType() === 'document') {
+                    const interceptedRequestUrl = interceptedRequest
+                      .url()
+                      .replace(/(?<=&|\?)utm_.*?(&|$)/gim, '');
+                    if (!isExcludedFromEnqueue(interceptedRequestUrl)) {
+                      await enqueueUniqueRequest({
+                        url: interceptedRequestUrl,
+                        skipNavigation: isUrlPdf(interceptedRequest.url()),
+                        label: interceptedRequestUrl,
+                      });
+                    }
                   }
-                }
-              });
+                });
+              }
+
             }
           } catch {
             // Recovery failed; Crawlee will retry the request automatically
@@ -958,10 +1191,16 @@ const crawlDomain = async ({
             }
           }
 
-          // Do not push to urlsCrawled.error here — Crawlee will retry the request
-          // (up to maxRequestRetries, default 3). If all retries are exhausted,
-          // failedRequestHandler will record the error. Pushing here causes
-          // duplicates and false positives for URLs that succeed on retry.
+          // Rethrow so Crawlee retries (up to maxRequestRetries) and, once
+          // retries are exhausted, failedRequestHandler records the URL as an
+          // error. Swallowing here made the request look successful, so the URL
+          // vanished from both scanned and unscanned lists. Skip the rethrow
+          // when the page was already recorded as scanned (avoids a duplicate
+          // scan on retry) or the crawl is aborting.
+          const alreadyScanned = urlsCrawled.scanned.some(item => item.url === request.url);
+          if (!isAbortingScanNow && !alreadyScanned) {
+            throw e;
+          }
         }
       },
       failedRequestHandler: async ({ request, response }) => {
@@ -1015,8 +1254,10 @@ const crawlDomain = async ({
               uniqueKey: `ratelimit_${request.url}`,
               userData: { rateLimitRetried: true },
             });
-          } catch {}
-          return;
+            return;
+          } catch {
+            // Re-enqueue failed: fall through so the URL is recorded as an error.
+          }
         }
 
         if (
@@ -1082,10 +1323,14 @@ const crawlDomain = async ({
         });
       },
       maxRequestsPerCrawl: Infinity,
-      maxConcurrency: specifiedMaxConcurrency || maxConcurrency,
+      maxConcurrency: rateController.target,
       autoscaledPoolOptions: {
-        minConcurrency: specifiedMaxConcurrency ? Math.min(specifiedMaxConcurrency, 10) : 10,
-        maxConcurrency: specifiedMaxConcurrency || maxConcurrency,
+        // Pinned to the rate controller's target (min = desired = max). Only
+        // 403/429 and measured main-thread starvation lower it — not Crawlee's
+        // overload heuristic, which on shared CI runners pins scans at 1.
+        minConcurrency: rateController.target,
+        desiredConcurrency: rateController.target,
+        maxConcurrency: rateController.target,
         desiredConcurrencyRatio: 0.98, // Increase threshold for scaling up
         scaleUpStepRatio: 0.99, // Scale up faster
         scaleDownStepRatio: 0.1, // Scale down slower
@@ -1112,9 +1357,11 @@ const crawlDomain = async ({
   // arrives during crawler.run() can abort the autoscaledPool. Without this,
   // the container's SIGKILL lands mid-write and produces a corrupted results.zip.
   registerCrawler(crawler);
+  const stopEnforcer = startConcurrencyEnforcer('domain', () => crawler.autoscaledPool, rateController);
   try {
     await crawler.run();
   } finally {
+    stopEnforcer();
     // Always unregister and clear the idle watchdog, even if crawler.run()
     // threw — otherwise the click-pass loop below could inherit a stale
     // reference or the interval could keep firing after the crawler exited.
@@ -1195,9 +1442,11 @@ const crawlDomain = async ({
       // iteration reuses the crawler instance and re-publishes it so a signal
       // during this pass can still abort the pool cleanly.
       registerCrawler(crawler);
+      const stopClickPassEnforcer = startConcurrencyEnforcer('domain-clickpass', () => crawler.autoscaledPool, rateController);
       try {
         await crawler.run();
       } finally {
+        stopClickPassEnforcer();
         unregisterCrawler(crawler);
         clearInterval(clickPassIdleCheck);
       }

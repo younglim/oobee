@@ -23,6 +23,7 @@ import {
   getProgressPercentage,
   retryFunction,
   zipResults,
+  resolveZipOutputPath,
   getIssuesPercentage,
   register,
   getEntryPageTitle,
@@ -36,6 +37,10 @@ import {
   resolveInspectPresetScanEnabled,
   resolveInspectPresetMetadata,
 } from './inspectPresetScan.js';
+import {
+  resolveReportMetadataOverrides,
+  sanitizeReportTitle,
+} from './reportMetadata/reportMetadata.js';
 import { ItemsStore } from './mergeAxeResults/itemsStore.js';
 import {
   compressJsonFileStreaming,
@@ -242,8 +247,11 @@ const writeHTML = async (
 
     outputStream.write(prefixData);
 
-    // For Proxied AI environments only
-    outputStream.write(`let proxyUrl = "${process.env.PROXY_API_BASE_URL || ''}"\n`);
+    // For Proxied AI environments only. asgard-0010 (2026-10-09 re-scan):
+    // JSON.stringify produces a correctly quoted/escaped JS string literal,
+    // so a value containing `"` can no longer break out of the assignment
+    // and inject script into the generated report.
+    outputStream.write(`let proxyUrl = ${JSON.stringify(process.env.PROXY_API_BASE_URL || '')}\n`);
 
     // Initialize GenAI feature flag
     outputStream.write(`
@@ -253,19 +261,28 @@ const writeHTML = async (
     (async () => {
       try {
         const featuresUrl = proxyUrl + '/api/ai/features';
-        const response = await fetch(featuresUrl, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' }
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        let response;
+        try {
+          response = await fetch(featuresUrl, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: controller.signal
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
         if (response.ok) {
           const features = await response.json();
           window.oobeeGenAiFeatureEnabled = features.genai_ui_enabled || false;
           console.log('GenAI UI feature flag:', window.oobeeGenAiFeatureEnabled);
         } else {
-          console.warn('Failed to fetch GenAI feature flag:', response.status);
+          console.info('GenAI feature flag unavailable (HTTP ' + response.status + '); GenAI features disabled.');
         }
       } catch (error) {
-        console.warn('Error fetching GenAI feature flag:', error);
+        // Backend unreachable (offline, CORS, blocked): keep GenAI disabled without noisy errors.
+        console.info('GenAI feature flag backend unreachable; GenAI features disabled.');
       }
     })();
   } else {
@@ -766,9 +783,16 @@ export const createBasicFormHTMLSnippet = filteredResults => {
 const moveElemScreenshots = (randomToken: string, storagePath: string) => {
   const currentScreenshotsPath = `${randomToken}/elemScreenshots`;
   const resultsScreenshotsPath = `${storagePath}/elemScreenshots`;
-  if (fs.existsSync(currentScreenshotsPath)) {
+  if (!fs.existsSync(currentScreenshotsPath)) return;
+  if (path.resolve(currentScreenshotsPath) === path.resolve(resultsScreenshotsPath)) return;
+  // PDF screenshots are written straight into the results dir, so with -i all the
+  // destination already exists; merge into it instead of moving over it.
+  if (!fs.existsSync(resultsScreenshotsPath)) {
     fs.moveSync(currentScreenshotsPath, resultsScreenshotsPath);
+    return;
   }
+  fs.copySync(currentScreenshotsPath, resultsScreenshotsPath, { overwrite: false });
+  fs.removeSync(currentScreenshotsPath);
 };
 
 const formatAboutStartTime = (dateString: string) => {
@@ -838,7 +862,19 @@ const generateArtifacts = async (
   const ruleTexts = getRuleTexts(lang);
   const localisedItemTypeDescription = getItemTypeDescription(lang);
   const inspectPresetMetadata = resolveInspectPresetMetadata();
-  const resolvedUrlScanned = inspectPresetMetadata?.siteUrl || urlScanned;
+  const reportMetadataOverrides = resolveReportMetadataOverrides();
+  const resolvedUrlScanned =
+    reportMetadataOverrides.pageUrl ||
+    inspectPresetMetadata?.siteUrl ||
+    urlScanned;
+  const resolvedSiteName =
+    reportMetadataOverrides.pageTitle ||
+    (() => {
+      const raw = getEntryPageTitle(pagesScanned, urlScanned)
+        .replace(/^\d+\s*:\s*/, '')
+        .trim();
+      return sanitizeReportTitle(raw);
+    })();
 
   const allIssues: AllIssues = {
     storagePath,
@@ -851,14 +887,7 @@ const generateArtifacts = async (
     // but we also drop control characters and cap the length here so a
     // pathological title cannot bloat the JSON payload or render as
     // interactive content in any future consumer of allIssues.
-    siteName: (() => {
-      const raw = getEntryPageTitle(pagesScanned, urlScanned)
-        .replace(/^\d+\s*:\s*/, '')
-        .trim();
-      // eslint-disable-next-line no-control-regex
-      const stripped = raw.replace(/[ -]/g, '');
-      return stripped.length > 512 ? stripped.slice(0, 512) : stripped;
-    })(),
+    siteName: resolvedSiteName,
     startTime: scanDetails.startTime ? scanDetails.startTime : new Date(),
     endTime: scanDetails.endTime ? scanDetails.endTime : new Date(),
     urlScanned: resolvedUrlScanned,
@@ -1201,12 +1230,9 @@ const generateArtifacts = async (
     }
   }
 
-  if (
-    !path.isAbsolute(constants.cliZipFileName) ||
-    path.dirname(constants.cliZipFileName) === '.'
-  ) {
-    constants.cliZipFileName = path.join(storagePath, constants.cliZipFileName);
-  }
+  // asgard-0001: confine relative names to storagePath (path.join would let
+  // `../..` climb out); absolute paths are checked again inside zipResults.
+  constants.cliZipFileName = resolveZipOutputPath(constants.cliZipFileName, storagePath);
 
   try {
     await fs.ensureDir(storagePath);

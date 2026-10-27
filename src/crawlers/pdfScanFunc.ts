@@ -1,5 +1,7 @@
 import { spawnSync } from 'child_process';
+import dns from 'dns';
 import fs from 'fs';
+import net from 'net';
 import { randomUUID } from 'crypto';
 import { createRequire } from 'module';
 import os from 'os';
@@ -20,6 +22,7 @@ import constants, {
   UrlsCrawled,
 } from '../constants/constants.js';
 import { cleanUpAndExit, getPdfStoragePath, getStoragePath } from '../utils.js';
+import { classifyServerAddress } from '../constants/common.js';
 import { error } from 'console';
 
 const require = createRequire(import.meta.url);
@@ -289,6 +292,122 @@ const MAX_PDF_DOWNLOAD_BYTES = (() => {
   return Number.isFinite(v) && v > 0 ? v : 100 * 1024 * 1024; // default 100 MB
 })();
 
+// asgard-0004: egress policy for the server-side PDF fetch.
+//
+// handlePdfDownload fetches from the Node process, not the browser, so none
+// of the browser-side guards apply. The URL comes from scanned content (page
+// links, sitemap <loc> entries), so a hostile site can point it anywhere.
+// Policy matches crawlDomain's navigation guard:
+//  - link-local / cloud-metadata: always refused.
+//  - loopback / RFC1918 / CGNAT / ULA: refused unless the operator's entry URL
+//    is itself internal (scanning an intranet or localhost app keeps working).
+//    OOBEE_ALLOW_INTERNAL_TARGETS=1 still lifts the private-range part.
+// Enforced at every point the destination can change:
+//  1. the request URL, when its host is an IP literal (got skips DNS for those);
+//  2. every DNS answer, via got's dnsLookup — covers hostnames, redirect hops to
+//     hostnames and DNS rebinding, because the check runs on the exact address
+//     the socket will connect to;
+//  3. every redirect hop, via followRedirect — covers IP-literal Location headers;
+//  4. the connected peer address (response.ip) as a final backstop.
+const REFUSED_ADDR_CODE = 'EOOBEE_REFUSED_ADDR';
+
+const refusedAddrError = (detail: string): Error =>
+  Object.assign(new Error(`Refusing PDF download from internal/metadata address: ${detail}`), {
+    code: REFUSED_ADDR_CODE,
+  });
+
+const isRefusedAddrError = (e: unknown): boolean => {
+  const err = e as { code?: string; cause?: { code?: string }; message?: string } | undefined;
+  return (
+    err?.code === REFUSED_ADDR_CODE ||
+    err?.cause?.code === REFUSED_ADDR_CODE ||
+    String(err?.message ?? '').includes('Refusing PDF download from internal/metadata address')
+  );
+};
+
+export const isRefusedPdfEgressAddress = (ip: string, entryIsInternal: boolean): boolean => {
+  const kind = classifyServerAddress(ip);
+  return kind === 'metadata' || (kind === 'internal' && !entryIsInternal);
+};
+
+const ipLiteralOf = (hostname: string): string | null => {
+  const bare = hostname.replace(/^\[|\]$/g, '');
+  return net.isIP(bare) ? bare : null;
+};
+
+type LookupCallback = (
+  err: NodeJS.ErrnoException | null,
+  address?: string | dns.LookupAddress[],
+  family?: number,
+) => void;
+
+export const createPdfEgressGuards = (entryIsInternal: boolean) => {
+  const assertUrlAllowed = (target: string): void => {
+    const parsed = new URL(target);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw refusedAddrError(`${target} (non-http(s) scheme)`);
+    }
+    const literal = ipLiteralOf(parsed.hostname);
+    if (literal && isRefusedPdfEgressAddress(literal, entryIsInternal)) {
+      throw refusedAddrError(target);
+    }
+  };
+
+  const dnsLookup = (
+    hostname: string,
+    options: dns.LookupOptions | LookupCallback,
+    callback?: LookupCallback,
+  ): void => {
+    let opts: dns.LookupOptions = {};
+    let cb = callback as LookupCallback;
+    if (typeof options === 'function') {
+      cb = options;
+    } else {
+      opts = options || {};
+    }
+    dns.lookup(hostname, { ...opts, all: true }, (err, addresses) => {
+      if (err) {
+        cb(err);
+        return;
+      }
+      const list = addresses as dns.LookupAddress[];
+      if (list.some(a => isRefusedPdfEgressAddress(a.address, entryIsInternal))) {
+        cb(refusedAddrError(`${hostname} -> ${list.map(a => a.address).join(', ')}`) as NodeJS.ErrnoException);
+        return;
+      }
+      if (opts.all) {
+        cb(null, list);
+        return;
+      }
+      if (list.length === 0) {
+        cb(Object.assign(new Error(`ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' }));
+        return;
+      }
+      cb(null, list[0].address, list[0].family);
+    });
+  };
+
+  const followRedirect = (response: { url?: string; headers?: Record<string, unknown> }): boolean => {
+    const location = response?.headers?.location;
+    if (typeof location !== 'string' || !location) return true;
+    assertUrlAllowed(new URL(location, response.url).href);
+    return true;
+  };
+
+  return { assertUrlAllowed, dnsLookup, followRedirect };
+};
+
+// asgard-0009 (2026-10-09 scan): PDF URLs come from scanned pages and can carry
+// a malformed percent-escape (e.g. "%E0%A4%A"), on which decodeURI throws
+// URIError and aborts the PDF scan. Fall back to the raw URL instead.
+export const safeDecodeUri = (value: string): string => {
+  try {
+    return decodeURI(value);
+  } catch {
+    return value;
+  }
+};
+
 let inFlightPdfDownloads = 0;
 const waitingPdfDownloads: (() => void)[] = [];
 
@@ -318,10 +437,14 @@ export const handlePdfDownload = (
   httpClient: BaseHttpClient,
   urlsCrawled: UrlsCrawled,
   session?: Session,
+  // asgard-0004: true when the operator's entry URL is itself internal
+  // (localhost / intranet scan). Required so no caller silently gets the
+  // wrong egress policy.
+  entryIsInternal = false,
 ): { pdfFileName: string; url: string } => {
   const pdfFileName = randomUUID();
   const { url } = request;
-  const pageTitle = decodeURI(request.url).split('/').pop() || request.url;
+  const pageTitle = safeDecodeUri(request.url).split('/').pop() || request.url;
   const pdfFilePath = `${getPdfStoragePath(randomToken)}/${pdfFileName}.pdf`;
 
   const recordNotScanned = (bucket: PageInfo[], metadata: string, httpStatusCode: number) => {
@@ -355,6 +478,15 @@ export const handlePdfDownload = (
         return;
       }
 
+      const egress = createPdfEgressGuards(entryIsInternal);
+      try {
+        egress.assertUrlAllowed(url);
+      } catch (e) {
+        consoleLogger.warn(`${(e as Error).message}`);
+        recordNotScanned(urlsCrawled.userExcluded, STATUS_CODE_METADATA[0], 0);
+        return;
+      }
+
       await acquirePdfDownloadSlot();
       try {
         let response: StreamingHttpResponse;
@@ -374,10 +506,27 @@ export const handlePdfDownload = (
             // Keeps got-scraping's generated TLS/header fingerprint stable per
             // session, matching what the browser already presented to this origin.
             sessionToken: session,
+            // asgard-0004: check every resolved address and every redirect hop.
+            dnsLookup: egress.dnsLookup,
+            followRedirect: egress.followRedirect,
           });
         } catch (e) {
+          if (isRefusedAddrError(e)) {
+            consoleLogger.warn(`Refusing PDF download from internal/metadata address: ${url}`);
+            recordNotScanned(urlsCrawled.userExcluded, STATUS_CODE_METADATA[0], 0);
+            return;
+          }
           consoleLogger.error(`Unable to request PDF at ${url}: ${e}`);
           recordNotScanned(urlsCrawled.error, STATUS_CODE_METADATA[2], 0);
+          return;
+        }
+
+        // Backstop: the address actually connected to (e.g. via a proxy-less
+        // path that bypassed dnsLookup).
+        if (response.ip && isRefusedPdfEgressAddress(response.ip, entryIsInternal)) {
+          response.stream.destroy();
+          consoleLogger.warn(`Refusing PDF download: ${url} connected to internal/metadata address ${response.ip}`);
+          recordNotScanned(urlsCrawled.userExcluded, STATUS_CODE_METADATA[0], 0);
           return;
         }
 
@@ -537,7 +686,7 @@ export const mapPdfScanResults = async (
       const filePath = path.join(getPdfStoragePath(randomToken), rawFileName);
 
 
-      const pageTitle = decodeURI(url).split('/').pop();
+      const pageTitle = safeDecodeUri(url).split('/').pop();
       translated.url = url;
       translated.pageTitle = pageTitle;
       
@@ -608,9 +757,42 @@ const transformRule = async (
   return [ruleId, transformed];
 };
 
+// Truncate to at most maxBytes of UTF-8 without splitting a code point.
+export const truncateUtf8 = (value: string, maxBytes: number): string => {
+  let bytes = 0;
+  let out = '';
+  for (const ch of value) {
+    const len = Buffer.byteLength(ch, 'utf8');
+    if (bytes + len > maxBytes) break;
+    bytes += len;
+    out += ch;
+  }
+  return out;
+};
+
+export const formatPdfScreenshotTitle = (pageTitle: string): string =>
+  truncateUtf8(
+    String(pageTitle || '')
+      .normalize('NFC')
+      .replaceAll(' ', '_')
+      .split('.')[0]
+      .replace(/[^\p{L}\p{M}\p{N}_-]/gu, '_'),
+    150,
+  ) || 'pdf';
+
 export const doPdfScreenshots = async (randomToken: string, result: TranslatedObject) => {
   const { filePath, pageTitle } = result;
-  const formattedPageTitle = pageTitle.replaceAll(' ', '_').split('.')[0];
+  // asgard-0002 (2026-10-09 scan): pageTitle comes from the PDF's URL, so it is
+  // attacker-controlled and ends up in a filename and in report markup. Keep
+  // the existing shape (spaces -> _, cut at the first '.') and then allow only
+  // letters, marks and digits in ANY script plus _ and -, so quotes, tabs,
+  // angle brackets and path separators can't reach either. \p{M} keeps Thai /
+  // Devanagari / Tamil vowel signs, which are combining marks, not letters.
+  // An ASCII-only allowlist turned every Chinese/Thai/Arabic title into "___".
+  // Filenames are limited to 255 BYTES; non-Latin scripts take 3 bytes per
+  // character, and "-<category>-<ruleId>-<n>.png" is appended, so the title
+  // is capped at 150 bytes inside formatPdfScreenshotTitle.
+  const formattedPageTitle = formatPdfScreenshotTitle(pageTitle);
   const screenshotsDir = path.join(getStoragePath(randomToken), 'elemScreenshots', 'pdf');
 
   ensureDirSync(screenshotsDir);

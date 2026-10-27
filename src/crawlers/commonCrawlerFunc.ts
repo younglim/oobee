@@ -6,15 +6,18 @@ import {
   disallowedListOfPatterns,
   guiInfoStatusTypes,
   RuleFlags,
+  STATUS_CODE_METADATA,
+  UrlsCrawled,
   saflyIconSelector,
 } from '../constants/constants.js';
 import { consoleLogger, guiInfoLog, silentLogger } from '../logs.js';
 import { enrichColorContrastDOMContext, takeScreenshotForHTMLElements } from '../screenshotFunc/htmlScreenshotFunc.js';
-import { isFilePath } from '../constants/common.js';
+import { isFilePath, waitForMainThreadIdle } from '../constants/common.js';
 import { extractAndGradeText } from './custom/extractAndGradeText.js';
 import { ItemsInfo } from '../mergeAxeResults.js';
 import { evaluateAltText } from './custom/evaluateAltText.js';
 import { escapeCssSelector } from './custom/escapeCssSelector.js';
+import { waitForMainThreadIdleInPage } from './custom/waitForMainThreadIdleInPage.js';
 import { framesCheck } from './custom/framesCheck.js';
 import { findElementByCssSelector } from './custom/findElementByCssSelector.js';
 import { getAxeConfiguration } from './custom/getAxeConfiguration.js';
@@ -24,6 +27,7 @@ import type { Response as PlaywrightResponse } from 'playwright';
 import fs from 'fs';
 import { ensureAndInjectSafeBrowsing } from '../safeBrowsingProfile.js';
 import path from 'path';
+import { getDomain } from 'tldts';
 import { getAxeLocale, getOobeeAxeTexts, formatRuntime } from '../i18n/index.js';
 
 // types
@@ -123,7 +127,7 @@ type FilteredResults = {
 // (retireBrowserAfterPageCount) and idle-close boundaries.
 const isTransientPageTeardown = (e: unknown): boolean => {
   const msg = (e as Error)?.message ?? '';
-  return /Target (page, context or browser has been closed|closed)|Execution context was destroyed|page (has been |was )closed|Browser has been closed|Navigation failed because page (was|has been) closed/i.test(
+  return /Target (page, context or browser has been closed|closed)|Execution context was destroyed|page (has been |was )closed|Browser has been closed|Navigation failed because page (was|has been) closed|Target crashed/i.test(
     msg,
   );
 };
@@ -143,9 +147,21 @@ const parentHtmlMaxBytes = (() => {
   return Number.isFinite(v) ? v : htmlMaxBytes;
 })();
 
+// Minimum wait before rechecking hydration-sensitive violations. Covers
+// network-driven late updates (fetch → set aria-controls, font swap) that the
+// main-thread idle gate can't see. CPU-starved hydration is handled by the
+// idle gate below, so this no longer has to be sized for the worst case.
 const axeRecheckHydrationMs = (() => {
   const value = parseInt(process.env.OOBEE_AXE_RECHECK_HYDRATION_MS ?? '', 10);
-  return Number.isFinite(value) && value >= 0 ? value : 5000;
+  return Number.isFinite(value) && value >= 0 ? value : 1000;
+})();
+
+// Upper bound on the main-thread idle wait that follows the minimum delay.
+// Defaults to 4000ms so worst-case total (1000 + 4000) matches the previous
+// fixed 5000ms sleep; healthy pages finish within a few idle callbacks.
+const axeRecheckIdleTimeoutMs = (() => {
+  const value = parseInt(process.env.OOBEE_AXE_RECHECK_IDLE_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(value) && value >= 0 ? value : 4000;
 })();
 
 const truncateHtml = (html: string, maxBytes = htmlMaxBytes, suffix = '…'): string => {
@@ -1022,6 +1038,23 @@ export const runAxeScript = async ({
     // Page may already be in a bad state; title will remain null
   }
 
+  // The 1000ms DOM-quiet window below is wall-clock based, so on a starved
+  // renderer (CPU contention) it can elapse while hydration JS is still queued.
+  // Gate on main-thread idle first. Crawler paths already did this in
+  // waitForPageLoaded, so it resolves within a few idle callbacks there; the
+  // custom-flow path (runAxeScan) has no prior gate and relies on this one.
+  // Bounded separately so perpetually busy pages don't pay the full idle
+  // budget a second time.
+  const preScanIdle = await waitForMainThreadIdle(
+    page,
+    Math.min(Number(process.env.OOBEE_IDLE_TIMEOUT_MS) || 10000, 5000),
+  );
+  if (!preScanIdle.reason.startsWith('main thread idle')) {
+    silentLogger.info(
+      `runAxeScript: main thread not idle before scan (${preScanIdle.reason}, ${preScanIdle.waitedMs}ms)`,
+    );
+  }
+
   try {
     // Checking for DOM mutations before proceeding to scan
     await page.evaluate(() => {
@@ -1133,7 +1166,9 @@ export const runAxeScript = async ({
       enableWcagAaa,
       gradingReadabilityFlag,
       axeRecheckHydrationMs,
+      axeRecheckIdleTimeoutMs,
       parentHtmlDepth,
+      waitForMainThreadIdleInPageFunctionString,
       evaluateAltTextFunctionString,
       escapeCssSelectorFunctionString,
       framesCheckFunctionString,
@@ -1153,6 +1188,7 @@ export const runAxeScript = async ({
         eval(flagUnlabelledClickableElementsFunctionString);
         eval(xPathToCssFunctionString);
         eval(getAxeConfigurationFunctionString);
+        eval(waitForMainThreadIdleInPageFunctionString);
         // remove so that axe does not scan
         document.querySelector(saflyIconSelector)?.remove();
 
@@ -1355,8 +1391,18 @@ export const runAxeScript = async ({
             );
 
             if (hasRecheckableViolation) {
+              // Short fixed delay for network-driven late updates, then wait
+              // for the main thread to go idle so CPU-starved hydration has
+              // actually run before we re-verify (a fixed sleep alone can
+              // elapse on a starved renderer with the hydration still queued).
               if (axeRecheckHydrationMs > 0) {
                 await new Promise(resolve => setTimeout(resolve, axeRecheckHydrationMs));
+              }
+              if (axeRecheckIdleTimeoutMs > 0) {
+                await waitForMainThreadIdleInPage({
+                  requiredIdle: 3,
+                  timeoutMs: axeRecheckIdleTimeoutMs,
+                });
               }
 
               // ---- aria-valid-attr-value --------------------------------
@@ -1501,7 +1547,9 @@ export const runAxeScript = async ({
       enableWcagAaa,
       gradingReadabilityFlag,
       axeRecheckHydrationMs,
+      axeRecheckIdleTimeoutMs,
       parentHtmlDepth: parentHtmlDepth,
+      waitForMainThreadIdleInPageFunctionString: waitForMainThreadIdleInPage.toString(),
       evaluateAltTextFunctionString: evaluateAltText.toString(),
       escapeCssSelectorFunctionString: escapeCssSelector.toString(),
       framesCheckFunctionString: framesCheck.toString(),
@@ -1663,6 +1711,77 @@ export const splitAuthHeaders = (
   };
 };
 
+// asgard-0007/0008 (2026-10-09 scan): operator headers other than
+// Authorization (Cookie, X-Api-Key, WAF tokens, ...) used to be set as
+// context-wide extraHTTPHeaders, so every cross-origin subresource and
+// redirect target received them. They are now attached per request, only
+// when the request is inside the entry URL's scope:
+//  - default 'site': same registrable domain (keeps static./cdn./api. working);
+//  - OOBEE_SCOPE_HEADERS_TO_ORIGIN=1: exact origin only;
+//  - OOBEE_UNSCOPED_OPERATOR_HEADERS=1: legacy send-everywhere behaviour.
+// Same policy crawlSitemap already applies.
+export type OperatorHeaderScope = 'all' | 'origin' | 'site';
+
+export const getOperatorHeaderScope = (): OperatorHeaderScope => {
+  const on = (v?: string) => /^(1|true|yes)$/i.test(v ?? '');
+  if (on(process.env.OOBEE_UNSCOPED_OPERATOR_HEADERS)) return 'all';
+  if (on(process.env.OOBEE_SCOPE_HEADERS_TO_ORIGIN)) return 'origin';
+  return 'site';
+};
+
+export const makeHeaderScopeMatcher = (
+  entryUrl: string,
+  scope: OperatorHeaderScope = getOperatorHeaderScope(),
+): ((target: string) => boolean) => {
+  if (scope === 'all') return () => true;
+  let entry: { origin: string; site: string } | null = null;
+  try {
+    const u = new URL(entryUrl);
+    entry = { origin: u.origin, site: getDomain(u.hostname, { allowPrivateDomains: true }) || u.hostname };
+  } catch {
+    entry = null;
+  }
+  return (target: string) => {
+    if (!entry) return false;
+    try {
+      const u = new URL(target);
+      if (scope === 'origin') return u.origin === entry.origin;
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+      return (getDomain(u.hostname, { allowPrivateDomains: true }) || u.hostname) === entry.site;
+    } catch {
+      return false;
+    }
+  };
+};
+
+// Header names that carry a credential. Their presence keeps TLS validation
+// on, exactly like an Authorization header.
+const CREDENTIAL_HEADER_RE = /^(authorization|proxy-authorization|cookie|x-api-key|api-key|apikey|x-auth-token|x-access-token|x-csrf-token|x-xsrf-token)$/i;
+export const hasCredentialHeaders = (headers?: Record<string, string> | null): boolean =>
+  Object.keys(headers || {}).some(k => CREDENTIAL_HEADER_RE.test(k) || /token|secret|session/i.test(k));
+
+// Attaches `headers` only to requests inside the entry URL's scope. Uses
+// route.fallback() so later-registered handlers (auth, URL guard) still run.
+export const addScopedHeaderRoute = async (
+  context: BrowserContext,
+  entryUrl: string,
+  headers: Record<string, string> | null | undefined,
+): Promise<void> => {
+  if (!headers || Object.keys(headers).length === 0) return;
+  const inScope = makeHeaderScopeMatcher(entryUrl);
+  await context.route('**/*', async (route, request) => {
+    try {
+      if (inScope(request.url())) {
+        await route.fallback({ headers: { ...request.headers(), ...headers } });
+        return;
+      }
+    } catch {
+      // fall through to an unmodified request
+    }
+    await route.fallback();
+  });
+};
+
 /**
  * Adds a route handler to a BrowserContext that sends the Authorization header
  * only to same-origin requests, preventing CORS preflight failures on cross-origin CDN resources.
@@ -1678,8 +1797,10 @@ export const addAuthRouteHandler = async (
   const entryOrigin = new URL(entryUrl).origin;
   await context.route('**/*', async (route, request) => {
     try {
+      // fallback(), not continue(): lets other route handlers (scoped
+      // operator headers, URL guard) also run for the same request.
       if (new URL(request.url()).origin === entryOrigin) {
-        await route.continue({
+        await route.fallback({
           headers: {
             ...request.headers(),
             ...(extraHeaders || {}),
@@ -1687,10 +1808,10 @@ export const addAuthRouteHandler = async (
           },
         });
       } else {
-        await route.continue();
+        await route.fallback();
       }
     } catch {
-      await route.continue();
+      await route.fallback();
     }
   });
 };
@@ -1943,4 +2064,21 @@ export const shouldSkipDueToUnsupportedContent = (
   }
 
   return false;
+};
+
+// Records a URL the crawler deliberately did not scan so it appears in the unscanned-pages report.
+export const recordUserExcluded = (
+  urlsCrawled: UrlsCrawled,
+  url: string,
+  statusCode: number,
+  actualUrl: string = url,
+): void => {
+  if (urlsCrawled.userExcluded.some(item => item.url === url)) return;
+  urlsCrawled.userExcluded.push({
+    url,
+    pageTitle: url,
+    actualUrl,
+    metadata: STATUS_CODE_METADATA[statusCode],
+    httpStatusCode: statusCode === 4 ? 0 : statusCode,
+  });
 };

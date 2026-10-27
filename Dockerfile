@@ -1,5 +1,6 @@
 # Use Microsoft Playwright image as base image
-# Node version is v22
+# Keep this tag in sync with the `playwright` version in package.json.
+# The image installs Node 24 from NodeSource apt; it is upgraded in place below.
 FROM mcr.microsoft.com/playwright:v1.61.1-noble
 
 
@@ -9,6 +10,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     zip \
     && rm -rf /var/lib/apt/lists/*
+
+# Upgrade the image's own nodejs package to the October 2026 security release
+# (drops the compromised eMudhra intermediate CA). Uses the image's signed
+# NodeSource repo, so /usr/bin/node itself is replaced, not shadowed on PATH.
+# Remove once a Playwright image built after 2026-10-21 ships >= this version.
+ARG NODEJS_DEB_VERSION=24.22.1-1nodesource1
+RUN set -e; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends --allow-downgrades "nodejs=${NODEJS_DEB_VERSION}"; \
+    apt-mark hold nodejs; \
+    rm -rf /var/lib/apt/lists/*; \
+    EXPECTED="v${NODEJS_DEB_VERSION%%-*}"; \
+    for n in $(which -a node); do \
+      echo "$n -> $($n -v)"; \
+      [ "$($n -v)" = "$EXPECTED" ] || { echo "ERROR: $n is $($n -v), expected $EXPECTED"; exit 1; }; \
+    done; \
+    echo "Node $(node -v), npm $(npm -v)"
 
 # =============================================================================
 # Google Chrome installation for Safe Browsing support
@@ -24,11 +42,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #
 # TO ENABLE: Set env var GOOGLE_SAFE_BROWSING=1 when running the container.
 # =============================================================================
+# INTEGRITY (asgard-0006, 2026-10-09 scan): Chrome is installed from Google's
+# signed apt repository, so apt verifies the package's GPG signature. The
+# signing key itself is pinned by fingerprint: the build fails if the key
+# served by dl.google.com is not Google's Linux package signing key.
+ARG GOOGLE_LINUX_SIGNING_KEY_FPR=EB4C1BFD4F042F6DDDCCEC917721F63BD38B4796
 RUN ARCH="$(dpkg --print-architecture)"; \
     if [ "$ARCH" = "amd64" ] || [ "$ARCH" = "arm64" ]; then \
-      wget -q -O /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome-stable_current_${ARCH}.deb" && \
-      apt-get update && apt-get install -y --no-install-recommends /tmp/chrome.deb && \
-      rm -f /tmp/chrome.deb && rm -rf /var/lib/apt/lists/*; \
+      set -e; \
+      apt-get update && apt-get install -y --no-install-recommends gnupg ca-certificates && \
+      wget -q -O /tmp/google.pub https://dl.google.com/linux/linux_signing_key.pub && \
+      FPR="$(gpg --show-keys --with-colons /tmp/google.pub | awk -F: '$1=="fpr"{print $10; exit}')" && \
+      if [ "$FPR" != "$GOOGLE_LINUX_SIGNING_KEY_FPR" ]; then \
+        echo "ERROR: unexpected Google signing key fingerprint: $FPR"; exit 1; \
+      fi && \
+      gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg /tmp/google.pub && \
+      echo "deb [arch=${ARCH} signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+        > /etc/apt/sources.list.d/google-chrome.list && \
+      apt-get update && apt-get install -y --no-install-recommends google-chrome-stable && \
+      rm -f /tmp/google.pub && rm -rf /var/lib/apt/lists/*; \
+      # Enable online OCSP/CRL checks (EnableOnlineRevocationChecks). This is the Linux
+      # equivalent of HKLM\SOFTWARE\Policies\Google\Chrome "EnableOnlineRevocationChecks"=dword:1.
+      mkdir -p /etc/opt/chrome/policies/managed && \
+      echo '{"EnableOnlineRevocationChecks": true}' > /etc/opt/chrome/policies/managed/oobee-revocation.json; \
     else \
       echo "NOTICE: Skipping Chrome install (Safe Browsing unavailable on $ARCH)"; \
     fi

@@ -355,6 +355,7 @@ export const init = async ({
     isEnableWcagAaa: ruleset,
     isSlowScanMode: specifiedMaxConcurrency,
     isAdhereRobots: followRobots,
+    nameEmail: { name, email },
   };
 
   const urlsCrawled = { ...constants.urlsCrawledObj };
@@ -787,17 +788,28 @@ export const scanHTML = async (
     tags.push('wcag2aaa');
   }
 
-  // Opt-in DoS bounds for this experimental library API (asgard-0005). Both are
-  // OFF by default so existing callers passing large/complex HTML are unchanged;
-  // set the env vars to guard against untrusted HTML exhausting CPU/memory.
-  const scanHtmlMaxBytes = (() => {
-    const v = parseInt(process.env.OOBEE_SCANHTML_MAX_BYTES ?? '', 10);
-    return Number.isFinite(v) && v > 0 ? v : 0; // 0 = unlimited
-  })();
-  const scanHtmlAxeTimeoutMs = (() => {
-    const v = parseInt(process.env.OOBEE_SCANHTML_AXE_TIMEOUT_MS ?? '', 10);
-    return Number.isFinite(v) && v > 0 ? v : 0; // 0 = no timeout
-  })();
+  // DoS bounds for scanHTML. Defaults sit far above any real page so
+  // legitimate callers never hit them, while a multi-hundred-MB payload can
+  // no longer OOM the host. Asgard's few-MB default was rejected: CMS exports
+  // and single-file reports legitimately reach tens of MB.
+  //
+  // asgard-0005 (2026-10-10 re-scan): "0 = unlimited" is no longer accepted
+  // for either bound. new JSDOM(htmlString) below runs synchronously, BEFORE
+  // the axe.run timeout race further down, so an operator who disables the
+  // byte cap (or the axe timeout) removes the only guard on that
+  // synchronous, unbounded parse for a caller that forwards untrusted HTML.
+  // A value of 0 (or anything <= 0) now falls back to the safe default
+  // instead of disabling the bound. The byte cap still cannot bound parse
+  // COST (a deeply-nested or node-dense document under the cap can still be
+  // slow to parse) — running the parse itself under a worker-thread
+  // time/memory budget is tracked separately as a follow-up.
+  const readBound = (raw: string | undefined, fallback: number): number => {
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const v = parseInt(raw, 10);
+    return Number.isFinite(v) && v > 0 ? v : fallback; // reject <= 0 (was: v >= 0, 0 = unlimited)
+  };
+  const scanHtmlMaxBytes = readBound(process.env.OOBEE_SCANHTML_MAX_BYTES, 50 * 1024 * 1024);
+  const scanHtmlAxeTimeoutMs = readBound(process.env.OOBEE_SCANHTML_AXE_TIMEOUT_MS, 5 * 60 * 1000);
 
   const htmlItems = Array.isArray(htmlContent) ? htmlContent : [htmlContent];
   const scanData = [];
@@ -835,12 +847,15 @@ export const scanHTML = async (
           axeRun,
           new Promise<never>((_resolve, reject) => {
             axeTimeoutId = setTimeout(
-              () =>
+              () => {
+                // Stops the abandoned axe run's timers so it can't keep the process alive.
+                dom.window.close();
                 reject(
                   new Error(
                     `scanHTML: axe.run exceeded the ${scanHtmlAxeTimeoutMs}ms OOBEE_SCANHTML_AXE_TIMEOUT_MS limit.`,
                   ),
-                ),
+                );
+              },
               scanHtmlAxeTimeoutMs,
             );
           }),

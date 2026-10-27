@@ -4,8 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag for the image (e.g. 0.10.87)'
-        required: true
+        description: 'Release tag for the image (e.g. 0.10.87). Ignored when "test_push" is checked'
+        required: false
+        type: string
+      test_push:
+        description: 'Push as test: tag the image only as "test" (no version tag, no "latest")'
+        required: false
+        type: boolean
+        default: false
+      branch:
+        description: 'Oobee branch to build from (test push only). Leave blank to use the branch running this workflow'
+        required: false
         type: string
   release:
     types: [published]
@@ -16,6 +25,7 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
+  TEST_PUSH: ${{ github.event_name == 'workflow_dispatch' && inputs.test_push && 'true' || 'false' }}
   REGISTRY: ghcr.io
 
 jobs:
@@ -32,12 +42,20 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ (github.event_name == 'workflow_dispatch' && inputs.test_push && inputs.branch) || github.ref }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        # asgard-0001 (10 Oct 2026 re-scan): this job holds packages: write +
+        # GITHUB_TOKEN, so a repointed mutable tag would let attacker code run
+        # with registry-push privileges. Pin to the commit the v3/v6 tags
+        # resolved to at review time (verified via GitHub's API, signed
+        # commits), matching the SHA-pinning pattern image.yml already uses
+        # for softprops/action-gh-release.
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -49,7 +67,7 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           platforms: ${{ matrix.platform }}
@@ -82,7 +100,7 @@ jobs:
           merge-multiple: true
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -104,16 +122,21 @@ jobs:
         # anything outside the strict tag allowlist before use.
         env:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          TEST_PUSH: ${{ env.TEST_PUSH }}
           REGISTRY: ${{ env.REGISTRY }}
           REPO_NAME: ${{ steps.repo.outputs.name }}
         run: |
           set -euo pipefail
-          if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^[A-Za-z0-9._-]+$'; then
-            echo "Refusing to publish: RELEASE_TAG contains characters outside [A-Za-z0-9._-]" >&2
-            exit 1
-          fi
           IMAGE="${REGISTRY}/${REPO_NAME}"
+          if [ "$TEST_PUSH" = "true" ]; then
+            TAG_ARGS=(--tag "${IMAGE}:test")
+          else
+            if ! printf '%s' "$RELEASE_TAG" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+              echo "Refusing to publish: RELEASE_TAG is empty or contains characters outside [A-Za-z0-9._-]" >&2
+              exit 1
+            fi
+            TAG_ARGS=(--tag "${IMAGE}:${RELEASE_TAG}" --tag "${IMAGE}:latest")
+          fi
           docker buildx imagetools create \
-            --tag "${IMAGE}:${RELEASE_TAG}" \
-            --tag "${IMAGE}:latest" \
+            "${TAG_ARGS[@]}" \
             $(printf "${IMAGE}@sha256:%s " *)
